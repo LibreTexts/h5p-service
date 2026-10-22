@@ -33,7 +33,7 @@
     "@lumieducation/h5p-server": "10.0.4",
     "express": "4.22.1",
     "express-fileupload": "1.5.1",
-    "mongodb": "^6.14.2",
+    "mongodb": "^7.7.0",
     "pino": "9.5.0"
   },
   "devDependencies": {
