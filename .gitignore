@@ -1,0 +1,26 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+.env
+.env.*
+!.env.example
+*.log
+npm-debug.log*
+
+# H5P client libraries, fetched by `npm run fetch:h5p-core` rather than vendored.
+h5p/core/
+h5p/editor/
+# Scratch directory for the fetch; left behind only on a failed extract.
+h5p/tmp/
+
+# Migration report output
+migration-reports/
+
+# Local tooling
+.codegraph/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

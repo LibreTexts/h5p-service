@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# No ref in the group, and never cancel: two merges landing close together must
+# serialize. A cancelled semantic-release can leave a tag pushed with no
+# GitHub release attached to it.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+# contents: write covers the tag, the release and the CHANGELOG commit.
+# Nothing else is needed because the github plugin's PR and issue comments are
+# disabled in .releaserc.json.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # semantic-release walks history back to the last tag.
+          fetch-depth: 0
+          # Force a single identity: semantic-release uses GITHUB_TOKEN from the
+          # environment for both the API and the push, rather than the
+          # credential checkout would otherwise leave in the git config.
+          persist-credentials: false
+
+      # Not .nvmrc: semantic-release 25 requires ^22.14.0 || >=24.10.0 and
+      # @semantic-release/changelog 7 requires ^22.22.2 || >=24.15, both above
+      # the Node version this service itself ships on.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --ignore-scripts
+
+      # The build and the embed contract were already proved by the required CI
+      # check on the pull request, and nothing is compiled for a release: the
+      # artifacts are a tag, a GitHub release and CHANGELOG.md.
+      - name: Release
+        run: npx semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

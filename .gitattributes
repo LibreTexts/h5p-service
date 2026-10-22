@@ -1,0 +1,10 @@
+# Normalize to LF in the repository regardless of each contributor's
+# core.autocrlf. The image and CI are Linux, and a CRLF shell script or
+# workflow run block fails there in ways that are tedious to diagnose.
+* text=auto eol=lf
+
+# Keep the lockfile out of diffs and merge conflict resolution by hand.
+package-lock.json -diff merge=ours linguist-generated
+
+# Vendored H5P client libraries are not this project's code.
+h5p/** linguist-vendored

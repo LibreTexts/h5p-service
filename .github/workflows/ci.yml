@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    # verify-embed-contract sets process.exitCode and lets the loop drain
+    # rather than calling process.exit(), so a lingering socket would otherwise
+    # hang this job until the six-hour default.
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      # --ignore-scripts skips the postinstall H5P fetch, which is handled as
+      # its own cached step below, and neutralizes install hooks from the whole
+      # dependency tree.
+      - name: Install dependencies
+        run: npm ci --no-audit --ignore-scripts
+
+      # Keyed on the fetch script because the pinned refs and their expected
+      # SHA-256 digests are constants inside it, so changing a version rotates
+      # the key automatically.
+      - name: Restore H5P client libraries
+        id: h5p-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            h5p/core
+            h5p/editor
+          key: h5p-client-${{ runner.os }}-${{ hashFiles('scripts/fetch-h5p-core.mjs') }}
+
+      - name: Fetch H5P client libraries
+        if: steps.h5p-cache.outputs.cache-hit != 'true'
+        run: npm run fetch:h5p-core
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # Separate from the contract check, which builds internally, so a
+      # compile failure is distinguishable from a contract failure.
+      - name: Build
+        run: npm run build
+
+      # Asserts the public embed contract: the legacy resizer redirect, the
+      # resizer file, the embed client protocol, and that configuration
+      # reaches the rendered page.
+      - name: Verify embed contract
+        run: npm run verify:embed-contract

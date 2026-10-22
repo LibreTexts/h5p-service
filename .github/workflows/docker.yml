@@ -1,0 +1,129 @@
+name: Docker
+
+# Manual only. The image is published deliberately, not as a side effect of
+# merging or releasing.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Tag, branch or SHA to build"
+        required: true
+        default: main
+      push_latest:
+        description: "Also move the :latest tag to this build"
+        type: boolean
+        default: false
+      platforms:
+        description: "Build platforms (arm64 builds under emulation and is much slower)"
+        type: choice
+        default: linux/amd64
+        options:
+          - linux/amd64
+          - linux/amd64,linux/arm64
+
+concurrency:
+  group: docker-${{ inputs.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: build and push
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          # Needed for `git describe` to see tags.
+          fetch-depth: 0
+
+      - name: Resolve version and revision
+        id: ver
+        run: |
+          set -euo pipefail
+          revision="$(git rev-parse HEAD)"
+          pkg="$(node -p "require('./package.json').version")"
+
+          if tag="$(git describe --tags --exact-match HEAD 2>/dev/null)"; then
+            version="${tag#v}"
+            # A tag built from a tree whose package.json was never bumped means
+            # the release and the image would disagree about what they are.
+            if [ "$version" != "$pkg" ]; then
+              echo "::error::Tag $tag implies version $version but package.json says $pkg." >&2
+              exit 1
+            fi
+            echo "Building release $version from tag $tag"
+          else
+            # Not a release build. The suffix keeps it from being mistaken for one.
+            version="${pkg}-${revision:0:7}"
+            echo "Building non-release $version from ${{ inputs.ref }}"
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+
+      # Only needed for cross-architecture builds, and it is the slow part.
+      - name: Set up QEMU
+        if: contains(inputs.platforms, 'arm64')
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # metadata-action lowercases the image name. GHCR rejects an uppercase
+      # path, which a hand-written tag list would produce from this repository.
+      - name: Derive tags and labels
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=${{ steps.ver.outputs.version }}
+            type=sha,format=long
+            type=raw,value=latest,enable=${{ inputs.push_latest }}
+          labels: |
+            org.opencontainers.image.version=${{ steps.ver.outputs.version }}
+            org.opencontainers.image.revision=${{ steps.ver.outputs.revision }}
+
+      - name: Build and push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          push: true
+          platforms: ${{ inputs.platforms }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Also passed as ARGs so a plain local `docker build` stamps the image
+          # the same way. The --label above wins at build time; both are kept so
+          # neither path can produce an unstamped image.
+          build-args: |
+            VERSION=${{ steps.ver.outputs.version }}
+            REVISION=${{ steps.ver.outputs.revision }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true
+
+      - name: Summary
+        run: |
+          {
+            echo "### Published"
+            echo
+            echo '```'
+            echo "${{ steps.meta.outputs.tags }}"
+            echo '```'
+            echo
+            echo "- version: \`${{ steps.ver.outputs.version }}\`"
+            echo "- revision: \`${{ steps.ver.outputs.revision }}\`"
+            echo "- platforms: \`${{ inputs.platforms }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

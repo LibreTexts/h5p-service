@@ -1,0 +1,21 @@
+.git
+.github
+node_modules
+dist
+# The builder fetches these itself. Copying host versions in would mask a
+# broken or unverified fetch.
+h5p/core
+h5p/editor
+h5p/tmp
+.env
+.env.*
+!.env.example
+migration-reports
+.codegraph
+*.log
+*.tsbuildinfo
+coverage
+README.md
+CHANGELOG.md
+CONTRIBUTING.md
+SECURITY.md

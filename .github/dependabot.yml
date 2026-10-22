@@ -1,0 +1,42 @@
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      aws-sdk:
+        patterns: ["@aws-sdk/*"]
+      dev-dependencies:
+        dependency-type: development
+    ignore:
+      # The H5P stack is pinned on purpose. @lumieducation/h5p-server 10.x
+      # targets H5P core API 1.27, which is what lets Studio's existing content
+      # types load unchanged, and the client library refs in
+      # scripts/fetch-h5p-core.mjs are pinned to match. A major bump here
+      # breaks content compatibility in a way CI cannot detect:
+      # verify:embed-contract asserts the embed protocol against a synthetic
+      # model and never loads a real content type.
+      #
+      # See the "H5P version pinning" section of README.md before overriding.
+      - dependency-name: "@lumieducation/*"
+        update-types: ["version-update:semver-major"]
+
+  # Keeps the SHA pins in .github/workflows current, rewriting both the SHA and
+  # its trailing version comment.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  # Watches the node:22-alpine3.22 base image. Because the tag pins the Alpine
+  # minor, expect an alpine3.23 offer that changes musl and OpenSSL: review
+  # those by hand rather than merging on green.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3

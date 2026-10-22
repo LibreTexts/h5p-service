@@ -1,0 +1,5 @@
+{
+  "//": "Build config. The migration is excluded on purpose: it imports mysql2, which is a devDependency, so a compiled copy inside the production image could only ever throw ERR_MODULE_NOT_FOUND. Run it from a checkout with `npm run migrate:studio-content`. `npm run typecheck` still uses tsconfig.json, so the migration is type-checked in CI.",
+  "extends": "./tsconfig.json",
+  "exclude": ["src/migrations/**"]
+}

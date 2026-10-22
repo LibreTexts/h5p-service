@@ -1,0 +1,42 @@
+name: Bug report
+description: Something behaves incorrectly
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If an activity renders but does not resize, or an embed works outside
+        ADAPT but not inside it, include the embedding page's URL. Those are
+        contract problems and the host matters.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      placeholder: |
+        1. Open https://.../h5p/12345/embed
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: content-id
+    attributes:
+      label: Content id
+      description: The integer in the embed URL, if the problem is specific to one activity.
+  - type: input
+    id: version
+    attributes:
+      label: Service version or image tag
+      placeholder: 0.2.1, or ghcr.io/libretexts/h5p-service:sha-...
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Service logs or browser console output. Remove any credentials.
+      render: text
