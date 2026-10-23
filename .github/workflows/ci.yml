@@ -15,8 +15,12 @@ permissions:
 jobs:
   verify:
     name: verify
-    # Same-repo (non-fork) PRs only
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    # Skip pull requests from forks. The event_name guard is load-bearing: on a
+    # push there is no github.event.pull_request, so testing the head repo
+    # alone evaluates false and skips CI on main entirely.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     permissions:
       contents: read
     runs-on: ubuntu-latest
