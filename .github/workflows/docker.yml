@@ -30,18 +30,35 @@ permissions:
   packages: write
 
 jobs:
-  publish:
+  check_authorization:
+    name: Check authorization to publish new Docker image
+    runs-on: ubuntu-latest
+    outputs:
+      isAuthorized: ${{ steps.check-auth.outputs.is_authorized }}
+    steps:
+      - name: check-auth
+        id: check-auth
+        run: echo "is_authorized=${{ contains(secrets.DEPLOYMENT_AUTHORIZED_USERS, github.triggering_actor) }}" >> $GITHUB_OUTPUT
+  build_and_push:
     name: build and push
+    needs: check_authorization
+    if: needs.check_authorization.outputs.isAuthorized == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
           # Needed for `git describe` to see tags.
           fetch-depth: 0
-
+      - name: Log into GitHub Container Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Resolve version and revision
         id: ver
         run: |
@@ -73,12 +90,6 @@ jobs:
         uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
 
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
       # metadata-action lowercases the image name. GHCR rejects an uppercase
       # path, which a hand-written tag list would produce from this repository.

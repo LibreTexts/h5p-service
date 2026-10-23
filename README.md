@@ -140,19 +140,24 @@ docker build --build-arg VERSION=0.0.0-dev --build-arg REVISION=$(git rev-parse 
 
 ## Releasing
 
-Releases are automated by semantic-release on every push to `main`. It reads
-[Conventional Commits](https://www.conventionalcommits.org) to decide the next
-version, then writes a git tag, a GitHub release and `CHANGELOG.md`. Nothing is
-published to npm.
+Both release and image publish are manually triggered. Merging to `main`
+publishes nothing.
 
-Because merges are squashed, the pull request title is the commit subject
-semantic-release parses. A title that is not a Conventional Commit produces no
-release and no error. See CONTRIBUTING.md, including why `BREAKING CHANGE:`
-must not be used before 1.0.
+To cut a release, run the **Release New Version** workflow. semantic-release
+reads the [Conventional Commits](https://www.conventionalcommits.org) landed
+since the last tag to decide the next version, then writes a git tag, a GitHub
+release and `CHANGELOG.md`. Nothing is published to npm. Only accounts listed
+in the `DEPLOYMENT_AUTHORIZED_USERS` secret can run it.
 
-Publishing an image is a separate, deliberate step: run the **Docker**
+The commit messages still decide the version, so they matter even though the
+trigger is manual. Because merges are squashed, the pull request title becomes
+the commit subject semantic-release parses. A title that is not a Conventional
+Commit contributes nothing to the next version, with no error. See
+CONTRIBUTING.md, including why `BREAKING CHANGE:` must not be used before 1.0.
+
+Publishing an image is a separate step after the release: run the **Docker**
 workflow, give it the tag to build, and tick `push_latest` only when that build
-should become `:latest`.
+should become `:latest`. It is gated on the same authorized-users secret.
 
 ## Scripts
 

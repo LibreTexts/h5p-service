@@ -15,6 +15,10 @@ permissions:
 jobs:
   verify:
     name: verify
+    # Same-repo (non-fork) PRs only
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     # verify-embed-contract sets process.exitCode and lets the loop drain
     # rather than calling process.exit(), so a lingering socket would otherwise

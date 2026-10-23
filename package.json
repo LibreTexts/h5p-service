@@ -11,7 +11,7 @@
   "type": "module",
   "main": "dist/index.js",
   "engines": {
-    "node": ">=22"
+    "node": ">=24.22.1"
   },
   "scripts": {
     "dev": "tsx watch --env-file=.env src/index.ts",
@@ -41,7 +41,7 @@
     "@semantic-release/git": "11.0.1",
     "@types/express": "4.17.21",
     "@types/express-fileupload": "1.5.1",
-    "@types/node": "22.10.2",
+    "@types/node": "24.19.2",
     "mysql2": "^3.24.6",
     "semantic-release": "25.0.9",
     "tsx": "4.19.2",

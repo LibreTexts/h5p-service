@@ -1,5 +1,5 @@
 # Stage 1: build
-FROM node:22-alpine3.22 AS builder
+FROM node:24.22.1-alpine3.24 AS builder
 WORKDIR /usr/src/h5p-service
 
 # The H5P client library fetch needs tar.
@@ -21,7 +21,7 @@ COPY src/ ./src/
 RUN npm run build
 
 # Stage 2: runtime
-FROM node:22-alpine3.22
+FROM node:24.22.1-alpine3.24
 WORKDIR /usr/src/h5p-service
 
 # Supplied by the image workflow. Also settable on a plain `docker build` so a

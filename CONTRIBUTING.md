@@ -8,7 +8,16 @@ cp .env.example .env        # fill in the required section
 npm run dev
 ```
 
-Node 22 or newer. `.nvmrc` pins the major the Docker image ships on.
+Node 24.22.1 or newer (24.x is the Krypton LTS line). `.nvmrc` pins the exact
+patch the Docker image ships on, so `nvm use` gives you what CI and production
+run. Three places must stay in step when bumping Node: `.nvmrc`, the two `FROM`
+lines in the `Dockerfile`, and `engines.node` in `package.json`. CI reads
+`.nvmrc` rather than pinning its own version.
+
+Note that bumping the Node patch can force the Alpine base along with it:
+upstream does not publish every Node patch against every Alpine minor. An
+Alpine minor bump changes musl and OpenSSL, so test the image, do not just
+read the diff.
 
 Every variable in the required section of `.env.example` has no default. The
 service exits at startup naming the first one that is missing or malformed.
@@ -30,8 +39,10 @@ CI runs typecheck, build and the embed contract check on every pull request.
 
 ## Commits
 
-Releases are automated. [Conventional Commits](https://www.conventionalcommits.org)
-decide the next version, so the message format is load-bearing.
+Releases are cut by running the **Release New Version** workflow, not by
+merging. But [Conventional Commits](https://www.conventionalcommits.org) still
+decide what the next version will be, so the message format is load-bearing
+regardless of when someone presses the button.
 
 | Type | Releases | Use for |
 | --- | --- | --- |
@@ -42,8 +53,8 @@ decide the next version, so the message format is load-bearing.
 
 **Merges are squashed, and the pull request title becomes the commit subject.**
 That title is what semantic-release reads. A title that is not a Conventional
-Commit produces no release and no error, which is a silent failure rather than
-a loud one. Check the title before merging.
+Commit contributes nothing to the next version, and says so nowhere. Check the
+title before merging.
 
 ### Do not use `!` or `BREAKING CHANGE:` before 1.0
 
@@ -60,10 +71,14 @@ Cutting 1.0.0 is a deliberate decision, not a side effect of a commit message.
 **The H5P stack.** `@lumieducation/h5p-server` 10.x targets H5P core API 1.27,
 and `scripts/fetch-h5p-core.mjs` pins the client libraries to 1.27.0 and 1.25
 to match. Together they are what lets Studio's existing content types load
-unchanged. Dependabot is configured to ignore major bumps of
-`@lumieducation/*`, and the dependency versions are exact rather than
-caret-ranged for the same reason. Read the "H5P version pinning" section of
-README.md before changing any of them, and re-test against real activities.
+unchanged. The dependency versions are exact rather than caret-ranged for
+that reason. Read the "H5P version pinning" section of README.md before
+changing any of them, and re-test against real activities.
+
+A major bump of `@lumieducation/*` breaks content compatibility in a way CI
+cannot detect: `verify:embed-contract` asserts the embed protocol against a
+synthetic model and never loads a real content type. Treat those bumps as
+manual work with real activities in front of you.
 
 **The client library checksums.** The two tarballs are verified against
 recorded SHA-256 digests. A mismatch means the upstream tag moved or the
@@ -71,7 +86,8 @@ download was tampered with. Verify which before touching `DIGESTS` -- never
 update a digest to make a failing fetch pass.
 
 **GitHub Action versions.** Every action is pinned to a full commit SHA with
-its version in a trailing comment. Dependabot maintains both. To add one:
+its version in a trailing comment. There is no automation keeping these
+current, so review them periodically. To add or refresh one:
 
 ```bash
 gh api repos/<owner>/<repo>/releases/latest --jq .tag_name
@@ -86,8 +102,12 @@ for an annotated tag, which does not work as an Actions pin.
 Four things are depended on by software outside LibreTexts' control: the embed
 URL shape, the Drupal-shaped resizer path, the `public/embed.js` message
 protocol, and integer content ids. Changing any of them breaks published
-textbooks or student grading. They are documented in README.md and owned via
-CODEOWNERS. If a change touches one, say so in the pull request.
+textbooks or student grading. They are documented in README.md. If a change
+touches one, say so in the pull request and get a second pair of eyes on it.
+
+The files that carry them: `public/embed.js`, `src/embed/renderer.ts`,
+`src/routes/embed.ts`, `src/routes/legacy.ts`. A change there that looks like
+cleanup can break production embeds.
 
 ## Configuration
 
