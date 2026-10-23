@@ -33,16 +33,51 @@ jobs:
   check_authorization:
     name: Check authorization to publish new Docker image
     runs-on: ubuntu-latest
-    outputs:
-      isAuthorized: ${{ steps.check-auth.outputs.is_authorized }}
     steps:
-      - name: check-auth
-        id: check-auth
-        run: echo "is_authorized=${{ contains(secrets.DEPLOYMENT_AUTHORIZED_USERS, github.triggering_actor) }}" >> $GITHUB_OUTPUT
+      # Fails the run rather than reporting an unauthorized outcome the
+      # dependent job then skips on. A skipped job leaves the whole run green,
+      # so a refused publish would look like a successful one that happened to
+      # push no image.
+      - name: Check authorization
+        env:
+          # Via env, not interpolated into the script. A secret expanded inline
+          # becomes part of the shell source, so its contents would execute.
+          AUTHORIZED_USERS: ${{ secrets.DEPLOYMENT_AUTHORIZED_USERS }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+        run: |
+          set -euo pipefail
+
+          actor="$(printf '%s' "$TRIGGERING_ACTOR" | tr '[:upper:]' '[:lower:]')"
+          entries=0
+          authorized=0
+
+          # Exact match per entry. A substring test would authorize any actor
+          # whose username is a fragment of an authorized one. GitHub
+          # usernames are case-insensitive, so both sides are lowercased.
+          while IFS= read -r entry; do
+            entry="$(printf '%s' "$entry" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+            [ -z "$entry" ] && continue
+            entries=$((entries + 1))
+            if [ "$entry" = "$actor" ]; then authorized=1; fi
+          done <<EOF
+          $(printf '%s' "${AUTHORIZED_USERS:-}" | tr ',' '\n')
+          EOF
+
+          if [ "$entries" -eq 0 ]; then
+            echo "::error title=Image publishing is not configured::The DEPLOYMENT_AUTHORIZED_USERS secret is unset or contains no usernames, so nobody can publish. Set it on the repository or the organization to a comma-separated list of GitHub usernames."
+            exit 1
+          fi
+
+          if [ "$authorized" -ne 1 ]; then
+            echo "::error title=Not authorized to publish::$TRIGGERING_ACTOR is not one of the $entries accounts in DEPLOYMENT_AUTHORIZED_USERS. Ask a listed maintainer to run this workflow, or to add you to the secret."
+            exit 1
+          fi
+
+          echo "$TRIGGERING_ACTOR is authorized to publish."
+
   build_and_push:
     name: build and push
     needs: check_authorization
-    if: needs.check_authorization.outputs.isAuthorized == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
