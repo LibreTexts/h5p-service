@@ -9,6 +9,7 @@ import {
   requiredOriginList,
   requiredRegion,
   required,
+  assertPairedAwsCredentials,
 } from "./config/env.js";
 
 /**
@@ -37,6 +38,13 @@ const LOG_LEVELS = [
 const NODE_ENVS = ["development", "test", "production"] as const;
 
 const nodeEnv = optionalEnum("NODE_ENV", NODE_ENVS, "development");
+
+// Static S3 credentials are optional, and deliberately absent from the config
+// object below: the AWS SDK client in `src/h5p.ts` is given no `credentials`
+// property, so its default provider chain resolves a task role, an instance
+// profile, a shared profile, or these variables. Half a pair is rejected here,
+// because the chain would otherwise fall through to a different identity.
+assertPairedAwsCredentials();
 
 const config = {
   port: optionalInt("PORT", 5100, 1, 65535),

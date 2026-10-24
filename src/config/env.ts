@@ -180,6 +180,30 @@ export function requiredRegion(name: string): string {
   return raw;
 }
 
+/**
+ * Rejects a half-configured static S3 credential pair.
+ *
+ * Both variables are optional: with neither set, the AWS SDK resolves
+ * credentials through its default provider chain (see `src/h5p.ts`). With only
+ * one set, the chain's environment provider reports no credentials rather than
+ * an error and the chain moves on to the next source, typically a task role or
+ * instance profile. S3 calls then succeed under an identity nobody chose,
+ * which is worse than refusing to start.
+ */
+export function assertPairedAwsCredentials(): void {
+  const hasKeyId = Boolean(process.env.AWS_ACCESS_KEY_ID);
+  const hasSecret = Boolean(process.env.AWS_SECRET_ACCESS_KEY);
+  if (hasKeyId === hasSecret) return;
+
+  const [set, missing] = hasKeyId
+    ? ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]
+    : ["AWS_SECRET_ACCESS_KEY", "AWS_ACCESS_KEY_ID"];
+
+  throw new Error(
+    `${set} is set but ${missing} is not. Set both to use static credentials, or neither to use the AWS SDK default credential chain.`
+  );
+}
+
 export interface StudioMysqlConfig {
   host: string;
   port: number;

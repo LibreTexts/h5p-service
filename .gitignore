@@ -24,3 +24,6 @@ migration-reports/
 .vscode/
 .DS_Store
 Thumbs.db
+CLAUDE.md
+.mcp.json
+.agents/

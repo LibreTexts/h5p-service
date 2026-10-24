@@ -1,7 +1,5 @@
 # LibreTexts H5P Service
 
-[![CI](https://github.com/LibreTexts/h5p-service/actions/workflows/ci.yml/badge.svg)](https://github.com/LibreTexts/h5p-service/actions/workflows/ci.yml)
-
 Hosts and plays H5P interactive activities for LibreTexts. This is the
 replacement for the H5P engine inside LibreTexts Studio, which ran on an
 end-of-life Drupal 9.4 / PHP 7.4 stack.
@@ -75,12 +73,11 @@ npm run dev
 
 ## Configuration
 
-Every variable in the first table is required and has no default. The service
-exits at startup naming the first one that is missing or malformed.
+Variables in the first table are required and have no default. The service
+exits at startup and logs the first one that is missing or malformed.
 
-Deployment-specific values are required on purpose. This repository is public,
-so a default would be inherited silently by a fork, and a production deploy
-could come up on a value nobody chose.
+Deployment-specific values are required on purpose as this repository is public,
+so a default would be inherited silently by a fork.
 
 | Variable | Purpose |
 | --- | --- |
@@ -90,8 +87,6 @@ could come up on a value nobody chose.
 | `S3_LIBRARY_BUCKET` | Bucket for library files. |
 | `S3_TEMPORARY_BUCKET` | Bucket for uploads. |
 | `AWS_REGION` | Region for the three buckets. |
-| `AWS_ACCESS_KEY_ID` | S3 credentials. `@lumieducation/h5p-mongos3` requires these explicitly and does not fall back to an instance role or the SDK credential chain. |
-| `AWS_SECRET_ACCESS_KEY` | As above. |
 | `ALLOWED_EMBED_PARENT_ORIGINS` | Comma-separated bare origins allowed to drive the embed's styling API. A trust boundary: an origin here can rewrite the embed's DOM. |
 | `EMBED_FRAME_ANCESTORS` | Space-separated CSP source list for the embed route's `frame-ancestors`. Validated and rebuilt before it reaches the header. |
 | `EMBED_ADAPT_REFERRERS` | Comma-separated bare origins where the embed hides its export, embed and H5P links because the host supplies its own controls. |
@@ -107,6 +102,8 @@ could come up on a value nobody chose.
 | `MONGODB_LIBRARY_COLLECTION` | `h5p_libraries` | Library records. |
 | `MONGODB_COUNTER_COLLECTION` | `h5p_counters` | Content-id sequence, kept apart so allocating an id never contends with a content write. |
 | `AWS_S3_ENDPOINT` | unset | Set for S3-compatible storage such as MinIO. Unset, the region resolves the real endpoint. |
+| `AWS_ACCESS_KEY_ID` | unset | Static S3 credentials. Unset, the AWS SDK resolves credentials through its default provider chain, so a deployment on ECS, EKS or EC2 uses its task role or instance profile and needs no IAM user. Set both or neither: half a pair is rejected at startup, because the chain would otherwise fall through to a different identity. |
+| `AWS_SECRET_ACCESS_KEY` | unset | As above. Local MinIO development is the main reason to set the pair. |
 | `H5P_CORE_PATH` | `h5p/core` | On-disk H5P core client library. Coupled to the image layout. |
 | `H5P_EDITOR_PATH` | `h5p/editor` | On-disk H5P editor client library. |
 | `EMBED_BADGE_HREF` | unset | Attribution badge link. With no href the badge is not rendered, so a deployment that is not LibreTexts shows no LibreTexts branding. |
@@ -128,7 +125,7 @@ docker run --rm -p 5100:5100 --env-file .env ghcr.io/libretexts/h5p-service:<ver
 ```
 
 It listens on `$PORT` (5100), answers `GET /health`, runs as uid 1000 (`node`),
-and carries a `HEALTHCHECK` that polls `/health`. The H5P client libraries are
+and serves a `HEALTHCHECK` that polls `/health`. The H5P client libraries are
 fetched and checksum-verified during the build, not at runtime. The migration
 is excluded from the compiled output, so it cannot be run from the image.
 
@@ -140,8 +137,7 @@ docker build --build-arg VERSION=0.0.0-dev --build-arg REVISION=$(git rev-parse 
 
 ## Releasing
 
-Both release and image publish are manually triggered. Merging to `main`
-publishes nothing.
+Both release and image publish are manually triggered.
 
 To cut a release, run the **Release New Version** workflow. semantic-release
 reads the [Conventional Commits](https://www.conventionalcommits.org) landed
@@ -150,14 +146,12 @@ release and `CHANGELOG.md`. Nothing is published to npm. Only accounts listed
 in the `DEPLOYMENT_AUTHORIZED_USERS` secret can run it.
 
 The commit messages still decide the version, so they matter even though the
-trigger is manual. Because merges are squashed, the pull request title becomes
-the commit subject semantic-release parses. A title that is not a Conventional
-Commit contributes nothing to the next version, with no error. See
-CONTRIBUTING.md, including why `BREAKING CHANGE:` must not be used before 1.0.
+trigger is manual. See CONTRIBUTING.md, including why `BREAKING CHANGE:` must
+not be used before 1.0.
 
 Publishing an image is a separate step after the release: run the **Docker**
 workflow, give it the tag to build, and tick `push_latest` only when that build
-should become `:latest`. It is gated on the same authorized-users secret.
+should become `:latest`. It is gated by the same authorized-users secret.
 
 ## Scripts
 

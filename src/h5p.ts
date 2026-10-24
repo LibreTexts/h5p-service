@@ -1,10 +1,10 @@
 import * as H5P from "@lumieducation/h5p-server";
 import {
   initMongo,
-  initS3,
   MongoS3LibraryStorage,
   S3TemporaryFileStorage,
 } from "@lumieducation/h5p-mongos3";
+import { S3 } from "@aws-sdk/client-s3";
 import IntegerIdContentStorage from "./storage/IntegerIdContentStorage.js";
 import config from "./config.js";
 import { childLogger } from "./logger.js";
@@ -25,7 +25,21 @@ export interface H5PStack {
  * because it owns the library and content managers the player reads through.
  */
 export async function buildH5P(): Promise<H5PStack> {
-  const s3 = initS3({
+  /**
+   * Constructed directly rather than through h5p-mongos3's `initS3`, which
+   * throws unless AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are both set in
+   * the environment. That wrapper does nothing else this service needs: it
+   * reads the same four variables off `process.env` and calls this same
+   * constructor, so dropping it costs no behaviour and removes the demand for
+   * a long-lived IAM user.
+   *
+   * No `credentials` property on purpose. Omitting it is what engages the AWS
+   * SDK's default provider chain, which resolves an ECS or EKS task role, an
+   * EC2 instance profile, a shared config profile, or the environment
+   * variables themselves. A deployment that wants static keys still sets the
+   * same two variables and the chain's own environment provider picks them up.
+   */
+  const s3 = new S3({
     region: config.s3.region,
     ...(config.s3.endpoint
       ? { endpoint: config.s3.endpoint, forcePathStyle: true }
