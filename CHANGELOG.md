@@ -1,3 +1,10 @@
+# [0.3.0](https://github.com/LibreTexts/h5p-service/compare/v0.2.0...v0.3.0) (2026-10-24)
+
+
+### Features
+
+* **env:** support using AWS SDK default chain credentials ([93c1b70](https://github.com/LibreTexts/h5p-service/commit/93c1b70420f9758ebfd5230ff89eb7102b143610))
+
 # [0.2.0](https://github.com/LibreTexts/h5p-service/compare/v0.1.0...v0.2.0) (2026-10-23)
 
 
