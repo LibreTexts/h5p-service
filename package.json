@@ -1,6 +1,6 @@
 {
   "name": "@libretexts/h5p-service",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "private": true,
   "description": "H5P hosting and playback service for LibreTexts. Serves interactive activities migrated from LibreTexts Studio.",
   "license": "GPL-3.0-or-later",

@@ -1,3 +1,10 @@
+## [0.4.5](https://github.com/LibreTexts/h5p-service/compare/v0.4.4...v0.4.5) (2026-10-27)
+
+
+### Performance Improvements
+
+* **authoring:** warm the content type cache at boot and report the editor ready sooner ([ec784fc](https://github.com/LibreTexts/h5p-service/commit/ec784fc43dbca3f35b6a5ef2d32e7ce43df99f91))
+
 ## [0.4.4](https://github.com/LibreTexts/h5p-service/compare/v0.4.3...v0.4.4) (2026-10-27)
 
 
