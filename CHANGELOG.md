@@ -1,3 +1,16 @@
+# [0.4.0](https://github.com/LibreTexts/h5p-service/compare/v0.3.0...v0.4.0) (2026-10-27)
+
+
+### Bug Fixes
+
+* **embed:** match Studio's embed page for migrated activities ([aacd3c4](https://github.com/LibreTexts/h5p-service/commit/aacd3c4860b3937f4080053431d39d451e25c435))
+
+
+### Features
+
+* **authoring:** add editor pages and capability-token access, off by default ([d7e49b6](https://github.com/LibreTexts/h5p-service/commit/d7e49b6b7d4e9ad39e8d2cfad563ec4d3cd380f2))
+* **migration:** pseudonymise, verify and sweep the Studio import ([c729a71](https://github.com/LibreTexts/h5p-service/commit/c729a714231b31c9751d927028ffdfb4bda3d421))
+
 # [0.3.0](https://github.com/LibreTexts/h5p-service/compare/v0.2.0...v0.3.0) (2026-10-24)
 
 
