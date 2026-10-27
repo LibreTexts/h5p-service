@@ -1,6 +1,6 @@
 import type { IPlayerModel } from "@lumieducation/h5p-server";
 import config from "../config.js";
-import { stripClimbingPathsInJson } from "./legacyPaths.js";
+import { studioFilteredParams } from "./studioParams.js";
 
 function escapeHtml(value: string): string {
   return value
@@ -70,10 +70,9 @@ export function renderEmbed(
       extra.contentUserData = [{ state: "{}" }];
     }
 
-    // Studio served files referenced as `../{id}/…` from the activity's own
-    // folder. See `legacyPaths.ts`.
+    // Parameters as Studio served them: see `studioParams.ts`.
     if (typeof content.jsonContent === "string") {
-      const jsonContent = stripClimbingPathsInJson(content.jsonContent);
+      const jsonContent = studioFilteredParams(content.jsonContent);
       if (jsonContent !== content.jsonContent) extra.jsonContent = jsonContent;
     }
 

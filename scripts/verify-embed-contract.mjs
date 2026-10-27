@@ -224,6 +224,30 @@ for (const token of [
   );
   check("the embed page serves climbing paths from the activity's own folder", climbing.includes('\\"path\\":\\"images/a.jpeg\\"'));
   check("only `path` values are rewritten", climbing.includes("../content/9/not-a-path"));
+
+  // Studio's validator removed library slots left empty. H5P.Column throws on
+  // one, blanking the activity and any Interactive Book chapter built on it.
+  const { studioFilteredParams } = await import("../dist/embed/studioParams.js");
+  const filtered = JSON.parse(
+    studioFilteredParams(
+      JSON.stringify({
+        content: [
+          { content: { params: {} }, useSeparator: "auto" },
+          { content: { library: "H5P.Text 1.1", params: { text: "kept" }, subContentId: "a" } },
+        ],
+        media: { type: { params: {}, metadata: {} } },
+        questions: [{ params: {} }, { library: "H5P.MultiChoice 1.16", params: {} }],
+        other: { dom: "<p></p>", params: {} },
+      })
+    )
+  );
+  check("an empty library slot is removed from its parent", filtered.content[0].content === undefined && filtered.content[0].useSeparator === "auto");
+  check("a slot with a library is kept", filtered.content[1].content?.params?.text === "kept");
+  check("an empty slot with metadata is removed", filtered.media.type === undefined);
+  check("an empty slot in a list is dropped, not left as null", filtered.questions.length === 1 && filtered.questions[0].library === "H5P.MultiChoice 1.16");
+  check("objects that are not library slots are kept", filtered.other?.dom === "<p></p>");
+  const untouched = JSON.stringify({ a: { library: "H5P.Text 1.1", params: {} } });
+  check("parameters needing no change are returned as the same string", studioFilteredParams(untouched) === untouched);
 }
 
 // Each of these proves a configured value reaches the embed client, which is
