@@ -37,6 +37,7 @@
   var lastDirty = null;
   var inputDirty = false;
   var POLL_MS = 1000;
+  var LOAD_POLL_MS = 50;
   var EXPIRY_WARNING_MS = 2 * 60 * 1000;
 
   function post(message) {
@@ -118,6 +119,10 @@
   function report() {
     var params = editorParams();
     if (!params) return;
+    // The selector exists before an existing activity's form has loaded, and
+    // until then reports no params. Taking that as the baseline would mark
+    // the activity unsaved the moment its form appears.
+    if (pageContentId && params.params === undefined) return;
     var json = JSON.stringify(params);
     if (baseline === null) {
       baseline = json;
@@ -197,7 +202,14 @@
     } else {
       h5peditor = new ns.Editor(undefined, undefined, mount, onEditorFrameLoaded);
     }
-    setInterval(report, POLL_MS);
+    // Poll fast until the editor is usable, so Conductor's spinner clears as
+    // soon as it is, then slow down to track unsaved changes.
+    var loadPoll = setInterval(function () {
+      report();
+      if (!loadedSent) return;
+      clearInterval(loadPoll);
+      setInterval(report, POLL_MS);
+    }, LOAD_POLL_MS);
   }
 
   function save(requestId, displayOptions) {

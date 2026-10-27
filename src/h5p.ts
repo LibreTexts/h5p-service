@@ -159,3 +159,42 @@ export function anonymousUser(): H5P.IUser {
     type: "local",
   };
 }
+
+/** How often to check whether the content type cache needs a refresh. */
+const CONTENT_TYPE_CACHE_CHECK_MS = 60 * 60 * 1000;
+
+/**
+ * Fills the editor's content type cache from the H5P Hub at boot, then keeps
+ * it fresh in the background.
+ *
+ * The cache lives in memory. Lumi fills an empty one inline, inside the
+ * editor's first `content-type-cache` request, and its Hub client has no
+ * timeout, so the first editor opened after each start waited about 7 s on
+ * api.h5p.org. Refreshing here means no editor request waits on the Hub.
+ * `updateIfNecessary` only calls the Hub once Lumi's refresh interval (a day)
+ * has passed, and a failed refresh keeps the previous cache. Never awaited, so
+ * a slow or unreachable Hub cannot delay startup.
+ */
+export function keepContentTypeCacheWarm(stack: H5PStack): void {
+  const cache = stack.editor.contentTypeCache;
+  let running = false;
+  const refresh = async (): Promise<void> => {
+    if (running) return;
+    running = true;
+    const started = Date.now();
+    try {
+      const updated = await cache.updateIfNecessary();
+      if (updated) {
+        log.info({ ms: Date.now() - started }, "Content type cache refreshed from the H5P Hub");
+      } else if (!(await cache.getLastUpdate())) {
+        log.warn({ ms: Date.now() - started }, "Content type cache is empty: the H5P Hub could not be reached");
+      }
+    } catch (err) {
+      log.warn({ err }, "Content type cache refresh failed");
+    } finally {
+      running = false;
+    }
+  };
+  void refresh();
+  setInterval(() => void refresh(), CONTENT_TYPE_CACHE_CHECK_MS).unref();
+}
