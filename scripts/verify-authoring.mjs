@@ -203,6 +203,30 @@ check("a later save without display options keeps them", r.status === 200 && r.b
 r = await call("GET", `/h5p/${contentId}/edit`);
 check("the editor page for saved content is served", r.status === 200);
 check("the editor page carries the stored display options", r.body.includes('"displayOptions":{"frame":true,"download":false,"embed":true,"copyright":true}'));
+check("the editor opens its filtered parameters route", r.body.includes(`"paramsUrl":"/h5p/${contentId}/edit/params"`));
+
+// ---------------------------------------------------------- editor parameters
+// Migrated content as Studio stored it: a path naming another activity's
+// folder, an unsaved-upload suffix, and an empty library slot.
+const raw = new MongoClient(MONGO_URL);
+await raw.connect();
+await raw.db(RUN).collection("h5p_content").updateOne(
+  { _id: String(contentId) },
+  { $set: { parameters: { text: "migrated", image: { path: "../content/21078/images/a.png#tmp", mime: "image/png" }, media: { type: { params: {} } } } } }
+);
+await raw.close();
+r = await call("GET", `/h5p/${contentId}/edit/params`);
+check("editor parameters without a token are a 401", r.status === 401);
+r = await call("GET", `/h5p/${contentId}/edit/params`, { headers: await auth(["edit"], Number(contentId) + 50) });
+check("editor parameters with a token for another activity are a 403", r.status === 403);
+r = await call("GET", `/h5p/${contentId}/edit/params`, { headers: await auth(["edit"], contentId) });
+const opened = r.body?.params?.params;
+check("the editor gets parameters with a library", r.status === 200 && r.body.library === "H5P.VerifyText 1.0", `${r.status} ${JSON.stringify(r.body).slice(0, 120)}`);
+check("the editor sees the activity's own copy of a file", opened?.image?.path === "images/a.png", opened?.image?.path);
+check("the editor never sees an empty library slot", opened && opened.media?.type === undefined, JSON.stringify(opened?.media));
+check("the editor parameters are never cached", r.headers.get("cache-control") === "no-store");
+r = await call("GET", `/h5p/params/${contentId}`);
+check("Lumi's own parameters route stays unfiltered", r.body?.params?.params?.image?.path === "../content/21078/images/a.png#tmp", JSON.stringify(r.body).slice(0, 160));
 
 const failedId = (await call("POST", "/h5p/service/allocate", { headers: await service(["allocate"]) })).body.contentId;
 r = await call("POST", `/h5p/${failedId}/save`, {
