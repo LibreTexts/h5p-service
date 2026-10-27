@@ -246,6 +246,20 @@ for (const token of [
   check("an empty slot with metadata is removed", filtered.media.type === undefined);
   check("an empty slot in a list is dropped, not left as null", filtered.questions.length === 1 && filtered.questions[0].library === "H5P.MultiChoice 1.16");
   check("objects that are not library slots are kept", filtered.other?.dom === "<p></p>");
+  // Studio's validator also removed the editor's `#tmp` suffix. The player
+  // cannot resolve a `#tmp` path, so the file is requested as `undefined`.
+  const tmp = JSON.parse(
+    studioFilteredParams(
+      JSON.stringify({
+        file: { path: "images/a.jpg#tmp" },
+        both: { path: "../content/21078/audios/b.mp3#tmp" },
+        text: "notes#tmp",
+      })
+    )
+  );
+  check("a #tmp suffix is removed from a file path", tmp.file.path === "images/a.jpg");
+  check("a climbing path with #tmp loses both", tmp.both.path === "audios/b.mp3", tmp.both.path);
+  check("#tmp is removed only from `path` values", tmp.text === "notes#tmp");
   const untouched = JSON.stringify({ a: { library: "H5P.Text 1.1", params: {} } });
   check("parameters needing no change are returned as the same string", studioFilteredParams(untouched) === untouched);
 }
