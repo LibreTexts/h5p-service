@@ -1,3 +1,10 @@
+## [0.4.1](https://github.com/LibreTexts/h5p-service/compare/v0.4.0...v0.4.1) (2026-10-27)
+
+
+### Bug Fixes
+
+* **embed:** drop empty library slots as Studio's validator did ([c6e2f28](https://github.com/LibreTexts/h5p-service/commit/c6e2f28eb6c06f98f90ddae066e097ba94c3f1a5))
+
 # [0.4.0](https://github.com/LibreTexts/h5p-service/compare/v0.3.0...v0.4.0) (2026-10-27)
 
 
