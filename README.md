@@ -166,6 +166,8 @@ should become `:latest`. It is gated by the same authorized-users secret.
 | `npm run verify:embed-contract` | Assert the public contracts above still hold |
 | `npm run verify:content-storage` | Exercise content storage against a real MongoDB and MinIO |
 | `npm run migrate:studio-content` | One-time import of Studio libraries and content |
+| `npm run verify:studio-import` | Check an import against Studio: records, files, and optionally live embeds |
+| `npm run verify:embed-sweep` | Load sampled embeds in Chromium inside a cross-origin parent and report errors, rendering and resizer failures by content type. Needs `--base-url=`; one-time `npx playwright-core install chromium-headless-shell` |
 
 `verify:embed-contract` needs no database and runs in CI on every pull request.
 `verify:content-storage` needs local containers and is a manual gate; run it
@@ -178,10 +180,23 @@ MySQL database, preserving content ids. It is a dry run unless given
 `--commit`, and it is idempotent: records are upserted by their natural key, so
 a re-run after a partial failure resumes rather than duplicating.
 
+It pseudonymises by default. Author names become stable fake names, email
+addresses are redacted from metadata and activity text, and author comments are
+dropped. That needs `STUDIO_PSEUDONYM_SALT`, a secret injected with `asm-exec`.
+Pass `--with-identities` to import real identifying information. Only the
+production import should do that.
+
 It needs the `STUDIO_MYSQL_*` variables and the content files synced into
 `S3_CONTENT_BUCKET` first. See the header of
 `src/migrations/importStudioContent.ts`. The migration is not part of the
 Docker image; run it from a checkout.
+
+`npm run verify:studio-import` checks the result afterwards and changes
+nothing. It compares content ids and libraries between Studio and Mongo, checks
+the id counter, and confirms library files and a sample of content files exist
+in S3. With `--base-url=` it also requests sampled embeds and both legacy
+resizer paths. It exits non-zero on anything unexplained. Options are in the
+header of `src/migrations/verifyStudioImport.ts`.
 
 ## Status
 
