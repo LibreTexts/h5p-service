@@ -1,3 +1,10 @@
+## [0.4.4](https://github.com/LibreTexts/h5p-service/compare/v0.4.3...v0.4.4) (2026-10-27)
+
+
+### Bug Fixes
+
+* return libraryTitle in save response ([bfc3df8](https://github.com/LibreTexts/h5p-service/commit/bfc3df8a17ee068773ec6198a0c0f50a15bb3c18))
+
 ## [0.4.3](https://github.com/LibreTexts/h5p-service/compare/v0.4.2...v0.4.3) (2026-10-27)
 
 
