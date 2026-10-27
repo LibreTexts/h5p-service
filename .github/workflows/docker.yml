@@ -14,12 +14,12 @@ on:
         type: boolean
         default: false
       platforms:
-        description: "Build platforms (arm64 builds under emulation and is much slower)"
+        description: "Build platforms"
         type: choice
-        default: linux/amd64
+        default: linux/amd64,linux/arm64
         options:
-          - linux/amd64
           - linux/amd64,linux/arm64
+          - linux/amd64
 
 concurrency:
   group: docker-${{ inputs.ref }}
