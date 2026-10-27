@@ -31,7 +31,8 @@ Changing any of them breaks published textbooks or student grading.
 ```
 
 The `{id}` is the integer Studio assigned. The Drupal-shaped resizer path is
-served as a permanent redirect to `/h5p/core/js/h5p-resizer.js`.
+served as a permanent redirect to `/h5p/core/js/h5p-resizer.js`, and so is its
+`/modules/contrib/...` variant, which ADAPT loads.
 
 **2. The embed messaging protocol** (`public/embed.js`). The embed posts
 `loaded` to its parent on load, relays every xAPI statement, and accepts
@@ -81,7 +82,7 @@ so a default would be inherited silently by a fork.
 
 | Variable | Purpose |
 | --- | --- |
-| `BASE_URL` | Public origin this service answers on, as a bare origin. Operator diagnostics only: the embed document emits same-origin relative URLs, so a wrong value does not break embeds. |
+| `BASE_URL` | Public origin this service answers on, as a bare origin. The embed document emits same-origin relative URLs, so a wrong value does not break embeds loading. It does appear in the code the H5P Embed button offers readers for pasting elsewhere, so production must be `https://studio.libretexts.org`. |
 | `MONGODB_URL` | MongoDB holding content parameters, metadata and library records. |
 | `S3_CONTENT_BUCKET` | Bucket for content files. |
 | `S3_LIBRARY_BUCKET` | Bucket for library files. |

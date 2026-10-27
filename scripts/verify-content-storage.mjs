@@ -110,6 +110,22 @@ check("re-import replaces rather than duplicating",
   (await db.collection("content").countDocuments({ _id: STUDIO_ID })) === 1);
 check("re-import updates metadata", (await storage.getMetadata(STUDIO_ID)).title === "Updated");
 
+// Studio's display options live beside Lumi's fields, so a content save must
+// not wipe them. A replaceOne-based addContent would.
+check("no display options stored by default", (await storage.getDisabledFeatures(STUDIO_ID)) === undefined);
+await storage.setDisabledFeatures(STUDIO_ID, 6);
+check("display options round-trip", (await storage.getDisabledFeatures(STUDIO_ID)) === 6);
+await storage.addContent({ ...metadata, title: "Edited again" }, params, user, STUDIO_ID);
+check("a content save keeps the stored display options", (await storage.getDisabledFeatures(STUDIO_ID)) === 6);
+let orphanRejected = false;
+try {
+  await storage.setDisabledFeatures("999998", 2);
+} catch {
+  orphanRejected = true;
+}
+check("display options are never stored for missing content", orphanRejected);
+check("no orphan document was created", (await storage.contentExists("999998")) === false);
+
 // 4. New content must not collide with migrated ids.
 await storage.seedCounter(31483);
 const newId = await storage.addContent(metadata, params, user);

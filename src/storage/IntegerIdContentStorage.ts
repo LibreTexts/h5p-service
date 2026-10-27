@@ -51,6 +51,12 @@ export type ContentDocument = {
   metadata: IContentMetadata;
   parameters: any;
   creator: string;
+  /**
+   * H5P core's `disabled_features` bitmask, carried over from Studio. Not part
+   * of Lumi's content model, so `addContent` must leave it alone. See
+   * `embed/displayOptions.ts`.
+   */
+  disabledFeatures?: number;
 };
 
 export type CounterDocument = { _id: string; seq: number };
@@ -123,11 +129,13 @@ export default class IntegerIdContentStorage implements IContentStorage {
   ): Promise<ContentId> {
     const id = contentId ?? (await this.nextContentId());
     try {
-      // `_id` is deliberately absent from the replacement: the driver rejects
-      // it there, and on upsert Mongo takes it from the filter's equality.
-      await this.mongodb.replaceOne(
+      // `$set` rather than upstream's `replaceOne`, so fields Lumi does not
+      // model, such as `disabledFeatures`, survive a content save. The three
+      // fields Lumi does write are replaced whole, as before. On upsert Mongo
+      // takes `_id` from the filter's equality.
+      await this.mongodb.updateOne(
         { _id: id },
-        { metadata, parameters: content, creator: user.id },
+        { $set: { metadata, parameters: content, creator: user.id } },
         { upsert: true }
       );
       return id;
@@ -386,5 +394,31 @@ export default class IntegerIdContentStorage implements IContentStorage {
       { $max: { seq: atLeast } },
       { upsert: true }
     );
+  }
+
+  /**
+   * The content's `disabled_features` bitmask, or undefined when none is
+   * stored (or the content does not exist; the player reports that itself).
+   */
+  async getDisabledFeatures(contentId: ContentId): Promise<number | undefined> {
+    const doc = await this.mongodb.findOne(
+      { _id: String(contentId) },
+      { projection: { _id: false, disabledFeatures: true } }
+    );
+    return typeof doc?.disabledFeatures === "number" ? doc.disabledFeatures : undefined;
+  }
+
+  /**
+   * Stores the `disabled_features` bitmask on existing content. Never creates
+   * a document: a bitmask without content would make `contentExists` lie.
+   */
+  async setDisabledFeatures(contentId: ContentId, disabledFeatures: number): Promise<void> {
+    const result = await this.mongodb.updateOne(
+      { _id: String(contentId) },
+      { $set: { disabledFeatures } }
+    );
+    if (result.matchedCount !== 1) {
+      throw new H5pError("mongo-s3-content-storage:content-not-found", {}, 404);
+    }
   }
 }

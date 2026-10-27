@@ -1,5 +1,6 @@
 import type { IPlayerModel } from "@lumieducation/h5p-server";
 import config from "../config.js";
+import { stripClimbingPathsInJson } from "./legacyPaths.js";
 
 function escapeHtml(value: string): string {
   return value
@@ -15,7 +16,7 @@ function escapeHtml(value: string): string {
  * `</script>` inside the JSON would close the tag early, so the forward slash is
  * escaped. `<!--` would open an HTML comment in legacy parsers.
  */
-function toScriptJson(value: unknown): string {
+export function toScriptJson(value: unknown): string {
   return JSON.stringify(value)
     .replace(/</g, "\\u003c")
     .replace(/>/g, "\\u003e")
@@ -32,11 +33,68 @@ function toScriptJson(value: unknown): string {
  * interact with the resulting DOM, including the `.h5p-actions` bar the embed
  * script adjusts and the `.h5p-content` mount point the H5P runtime expects.
  */
-export function renderEmbed(model: IPlayerModel, language: string): string {
+export function renderEmbed(
+  model: IPlayerModel,
+  language: string,
+  options: { embedCode?: boolean } = {}
+): string {
   const contentId = String(model.contentId);
+  const contentKey = `cid-${contentId}`;
   const title =
-    (model.integration?.contents?.[`cid-${contentId}`] as any)?.metadata
+    (model.integration?.contents?.[contentKey] as any)?.metadata
       ?.title ?? `H5P Content ${contentId}`;
+
+  /**
+   * The code H5P's Embed button offers. Lumi leaves `embedCode` and
+   * `resizeCode` unset, so without them the button opens a dialog reading
+   * "undefined". The shape follows Studio's (`H5PContent::getH5PIntegration`),
+   * `:w` and `:h` included, which H5P core replaces with the size the
+   * reader picks. The URLs are absolute because the code is pasted onto other
+   * sites, so they come from `BASE_URL`, and the resizer uses its canonical
+   * path rather than the legacy Drupal one.
+   */
+  let integration = model.integration;
+  const content = integration?.contents?.[contentKey] as Record<string, any> | undefined;
+  if (content) {
+    const extra: Record<string, unknown> = {};
+
+    /**
+     * Studio preloaded an empty saved state for every reader
+     * (`H5PContent::getH5PIntegration`), so H5P core never asked the server
+     * for one. Without it, every embed load requests
+     * `/h5p/contentUserData/{id}/state/0`, which this service does not serve,
+     * and gets a 404. Nothing is stored for anonymous readers, so `{}` is the
+     * truthful answer.
+     */
+    if (content.contentUserData?.[0]?.state === undefined) {
+      extra.contentUserData = [{ state: "{}" }];
+    }
+
+    // Studio served files referenced as `../{id}/…` from the activity's own
+    // folder. See `legacyPaths.ts`.
+    if (typeof content.jsonContent === "string") {
+      const jsonContent = stripClimbingPathsInJson(content.jsonContent);
+      if (jsonContent !== content.jsonContent) extra.jsonContent = jsonContent;
+    }
+
+    if (options.embedCode) {
+      const origin = config.baseUrl;
+      const lang = content.metadata?.defaultLanguage || language;
+      extra.embedCode =
+        `<iframe src="${origin}/h5p/${encodeURIComponent(contentId)}/embed" width=":w" height=":h" ` +
+        `frameborder="0" allowfullscreen="allowfullscreen" lang="${escapeHtml(lang)}" ` +
+        `title="${escapeHtml(title)}"></iframe>`;
+      extra.resizeCode = `<script src="${origin}/h5p/core/js/h5p-resizer.js" charset="UTF-8"></script>`;
+    }
+
+    integration = {
+      ...integration,
+      contents: {
+        ...integration.contents,
+        [contentKey]: { ...content, ...extra } as NonNullable<IPlayerModel["integration"]["contents"]>[string],
+      },
+    };
+  }
 
   const scripts = model.scripts
     .map((src) => `<script src="${escapeHtml(src)}"></script>`)
@@ -67,7 +125,7 @@ export function renderEmbed(model: IPlayerModel, language: string): string {
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${escapeHtml(title)}</title>
     ${styles}
-    <script>window.H5PIntegration = ${toScriptJson(model.integration)};</script>
+    <script>window.H5PIntegration = ${toScriptJson(integration)};</script>
     <script>window.__LIBRETEXTS_EMBED__ = ${toScriptJson(embedSettings)};</script>
     ${scripts}
   </head>

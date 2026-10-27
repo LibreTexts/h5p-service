@@ -15,6 +15,11 @@ export interface H5PStack {
   editor: H5P.H5PEditor;
   player: H5P.H5PPlayer;
   config: H5P.H5PConfig;
+  /**
+   * The same storage the editor and player use, typed concretely for the
+   * methods Lumi does not know about, such as the display-option bitmask.
+   */
+  contentStorage: IntegerIdContentStorage;
 }
 
 /**
@@ -111,7 +116,7 @@ export async function buildH5P(): Promise<H5PStack> {
     "H5P stack initialized"
   );
 
-  return { editor, player, config: h5pConfig };
+  return { editor, player, config: h5pConfig, contentStorage };
 }
 
 /**
