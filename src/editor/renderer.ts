@@ -69,7 +69,8 @@ export function renderEditorPage(model: IEditorModel, language: string, settings
     parentOrigins: settings.parentOrigins,
     contentId: settings.contentId,
     displayOptions: settings.displayOptions,
-    paramsUrl: settings.contentId ? `${model.urlGenerator.parameters()}/${settings.contentId}` : null,
+    // Filtered as the player sees them: see the route in routes/authoring.ts.
+    paramsUrl: settings.contentId ? `/h5p/${encodeURIComponent(settings.contentId)}/edit/params` : null,
     saveUrlBase: "/h5p",
   };
 

@@ -6,6 +6,7 @@ import type { CapabilityUser } from "../auth/CapabilityPermissionSystem.js";
 import type { CapabilityAction } from "../auth/capabilityToken.js";
 import { renderEditorPage } from "../editor/renderer.js";
 import { authorDisplayOptions, disabledFeaturesFrom } from "../embed/displayOptions.js";
+import { studioFilteredParams } from "../embed/studioParams.js";
 
 const log = childLogger("authoring");
 
@@ -59,6 +60,8 @@ function requireCapability(action: CapabilityAction, matchParam?: string) {
  * Authoring routes, mounted under /h5p only when `AUTHORING_ENABLED` is on.
  *
  * - `GET /new/edit`, `GET /{id}/edit`: the editor page Conductor frames.
+ * - `GET /{id}/edit/params`: the parameters the editor opens, under an `edit`
+ *   token for that id.
  * - `POST /{id}/save`: saves the editor's content, and the author's display
  *   options, under an `edit` token for that id.
  * - `POST /service/allocate`: takes the next content id, under an `allocate`
@@ -101,6 +104,33 @@ export default function authoringRouter(stack: H5PStack): Router {
 
   router.get("/new/edit", (req, res) => editorPage(req, res, null));
   router.get(`/:contentId${CONTENT_ID}/edit`, (req, res) => editorPage(req, res, req.params.contentId));
+
+  /**
+   * The editor opens parameters as Studio served them, the same filter the
+   * player gets (`embed/studioParams.ts`), not Lumi's raw `/h5p/params` copy.
+   * The editor cannot resolve a path naming another activity's folder: it
+   * shows a broken file and saves an empty path, so the first save of 176
+   * migrated activities would lose those files. Filtered, the path names the
+   * activity's own copy, and the save keeps it.
+   */
+  router.get(`/:contentId${CONTENT_ID}/edit/params`, requireCapability("edit", "contentId"), async (req: Request, res: Response) => {
+    const { contentId } = req.params;
+    try {
+      const content: any = await stack.editor.getContent(contentId, userOf(req) as any);
+      const params = content.params?.params;
+      if (params !== undefined) {
+        const json = JSON.stringify(params);
+        const filtered = studioFilteredParams(json);
+        if (filtered !== json) content.params.params = JSON.parse(filtered);
+      }
+      res.setHeader("Cache-Control", "no-store");
+      res.json(content);
+    } catch (err: any) {
+      const status = typeof err?.httpStatusCode === "number" ? err.httpStatusCode : 500;
+      log.warn({ err, contentId }, "Editor parameters failed");
+      res.status(status).json({ error: err?.errorId || "params_failed" });
+    }
+  });
 
   router.post(
     `/:contentId${CONTENT_ID}/save`,
