@@ -1,3 +1,10 @@
+## [0.4.3](https://github.com/LibreTexts/h5p-service/compare/v0.4.2...v0.4.3) (2026-10-27)
+
+
+### Bug Fixes
+
+* **authoring:** open migrated content in the editor as the player sees it ([3c98c91](https://github.com/LibreTexts/h5p-service/commit/3c98c91b7a4c96e22532dd84e8196ae2da5c40e7))
+
 ## [0.4.2](https://github.com/LibreTexts/h5p-service/compare/v0.4.1...v0.4.2) (2026-10-27)
 
 
