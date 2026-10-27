@@ -72,3 +72,8 @@ jobs:
       # reaches the rendered page.
       - name: Verify embed contract
         run: npm run verify:embed-contract
+
+      # Asserts the authoring access layer: public key configuration, capability
+      # token verification, and the permissions Lumi is given. No database.
+      - name: Verify capability tokens
+        run: node scripts/verify-capability-token.mjs

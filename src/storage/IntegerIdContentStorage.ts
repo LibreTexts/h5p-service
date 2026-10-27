@@ -385,6 +385,15 @@ export default class IntegerIdContentStorage implements IContentStorage {
   }
 
   /**
+   * Takes the next content id without creating content, for Conductor to
+   * attach to a new Activity before the first save (authoring design, section
+   * 4). An id taken and never saved is simply skipped; ids are never reused.
+   */
+  async allocateContentId(): Promise<string> {
+    return this.nextContentId();
+  }
+
+  /**
    * Raises the id counter so newly created content never reuses a Studio id.
    * Called by the migration once content is imported.
    */

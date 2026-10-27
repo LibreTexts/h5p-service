@@ -10,6 +10,7 @@ import {
   requiredRegion,
   required,
   assertPairedAwsCredentials,
+  requiredEd25519PublicKeySet,
 } from "./config/env.js";
 
 /**
@@ -38,6 +39,8 @@ const LOG_LEVELS = [
 const NODE_ENVS = ["development", "test", "production"] as const;
 
 const nodeEnv = optionalEnum("NODE_ENV", NODE_ENVS, "development");
+
+const authoringEnabled = optionalEnum("AUTHORING_ENABLED", ["true", "false"] as const, "false") === "true";
 
 // Static S3 credentials are optional, and deliberately absent from the config
 // object below: the AWS SDK client in `src/h5p.ts` is given no `credentials`
@@ -102,6 +105,34 @@ const config = {
   h5p: {
     corePath: path.resolve(optional("H5P_CORE_PATH", "h5p/core")),
     editorPath: path.resolve(optional("H5P_EDITOR_PATH", "h5p/editor")),
+  },
+
+  /**
+   * H5P authoring, behind a switch that defaults off. See
+   * H5P_AUTHORING_DESIGN.md in the migration workspace.
+   *
+   * Off, the service behaves exactly as in phase 1: every request is
+   * anonymous and an Authorization header is ignored. On, a request carrying a
+   * Conductor-signed capability token runs as that token's user, with only the
+   * rights the token grants. Production keeps it off until Studio is frozen,
+   * because new content ids would otherwise collide with ones Studio is still
+   * issuing.
+   */
+  authoring: {
+    enabled: authoringEnabled,
+    /**
+     * Conductor's Ed25519 public keys, as a JWK set. Required only when
+     * authoring is on. Public keys are not secret, so this is ordinary
+     * configuration rather than a secret.
+     */
+    publicKeys: authoringEnabled ? requiredEd25519PublicKeySet("CAPABILITY_TOKEN_PUBLIC_KEYS") : [],
+    /**
+     * Conductor's origins: the only pages allowed to frame the editor and to
+     * exchange messages with it. Required only when authoring is on. Narrower
+     * than `EMBED_FRAME_ANCESTORS` on purpose: anyone may embed an activity,
+     * but only Conductor may host its editor.
+     */
+    parentOrigins: authoringEnabled ? requiredOriginList("EDITOR_PARENT_ORIGINS") : [],
   },
 
   embed: {

@@ -110,6 +110,9 @@ so a default would be inherited silently by a fork.
 | `EMBED_BADGE_HREF` | unset | Attribution badge link. With no href the badge is not rendered, so a deployment that is not LibreTexts shows no LibreTexts branding. |
 | `EMBED_BADGE_LOGO_URL` | unset | Badge logo. |
 | `EMBED_BADGE_LABEL` | unset | Badge text and link title. |
+| `AUTHORING_ENABLED` | `false` | `true` accepts Conductor-signed capability tokens for H5P authoring. Off, every request is anonymous and an Authorization header is ignored. Keep it off in production until Studio authoring is frozen and the id counter re-seeded. |
+| `EDITOR_PARENT_ORIGINS` | unset | Required when `AUTHORING_ENABLED=true`. Conductor's origins, comma-separated: the only pages that may frame the editor (`frame-ancestors`) and exchange messages with it. Narrower than `EMBED_FRAME_ANCESTORS` on purpose. |
+| `CAPABILITY_TOKEN_PUBLIC_KEYS` | unset | Required when `AUTHORING_ENABLED=true`. Conductor's Ed25519 public keys as a JWK set, each with a `kid`: `{"keys":[{"kty":"OKP","crv":"Ed25519","x":"...","kid":"..."}]}`. Not secret. A key carrying `d` (a private key) is refused at startup. List two keys while rotating. |
 
 `STUDIO_MYSQL_*` are read only by the migration, lazily, so the service never
 demands them. See `.env.example`.
@@ -164,7 +167,9 @@ should become `:latest`. It is gated by the same authorized-users secret.
 | `npm run typecheck` | Types only, no emit, including the migration |
 | `npm run fetch:h5p-core` | Re-fetch and verify the H5P client libraries |
 | `npm run verify:embed-contract` | Assert the public contracts above still hold |
+| `npm run verify:capability-token` | Assert token verification and the permission system Lumi is given |
 | `npm run verify:content-storage` | Exercise content storage against a real MongoDB and MinIO |
+| `npm run verify:authoring` | Exercise the authoring routes against a real MongoDB and MinIO, with authoring on |
 | `npm run migrate:studio-content` | One-time import of Studio libraries and content |
 | `npm run verify:studio-import` | Check an import against Studio: records, files, and optionally live embeds |
 | `npm run verify:embed-sweep` | Load sampled embeds in Chromium inside a cross-origin parent and report errors, rendering and resizer failures by content type. Needs `--base-url=`; one-time `npx playwright-core install chromium-headless-shell` |
@@ -200,6 +205,17 @@ header of `src/migrations/verifyStudioImport.ts`.
 
 ## Status
 
-Phase 1: serving and embedding activities migrated from Studio. Authoring
-arrives in phase 2, which is why the editor AJAX routes are currently disabled
-in `src/index.ts`.
+Phase 1: serving and embedding activities migrated from Studio.
+
+Authoring is built and switched off by default (`AUTHORING_ENABLED`). Turned
+on, the service adds:
+
+| Route | Needs | Purpose |
+| --- | --- | --- |
+| `GET /h5p/new/edit`, `GET /h5p/{id}/edit` | nothing; the page waits for a token | The editor page Conductor frames. Speaks the protocol in `public/editor-page.js`. |
+| `POST /h5p/{id}/save` | `edit` token for `{id}` | Saves the editor's content and the author's display options. |
+| `POST /h5p/service/allocate` | `allocate` token | Takes the next content id for a new activity. Server to server. |
+| `DELETE /h5p/service/content/{id}` | `delete` token for `{id}` | Deletes content and its files. Server to server. |
+| `/h5p/ajax`, `/h5p/editor/*`, `/h5p/temp-files/*` | a token for `/h5p/ajax` | H5P's own editor routes, from Lumi. |
+
+Tokens are Ed25519 JWTs signed by Conductor. This service verifies them and never issues them. The design is in `H5P_AUTHORING_DESIGN.md` in the migration workspace.

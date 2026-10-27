@@ -6,6 +6,7 @@ import {
 } from "@lumieducation/h5p-mongos3";
 import { S3 } from "@aws-sdk/client-s3";
 import IntegerIdContentStorage from "./storage/IntegerIdContentStorage.js";
+import CapabilityPermissionSystem from "./auth/CapabilityPermissionSystem.js";
 import config from "./config.js";
 import { childLogger } from "./logger.js";
 
@@ -86,26 +87,48 @@ export async function buildH5P(): Promise<H5PStack> {
     // offering both.
     setFinishedEnabled: false,
     contentUserStateSaveInterval: false,
+    // Lumi's default upload whitelist minus Flash, which no browser runs. SVG
+    // is already absent from it, and must stay absent: an uploaded SVG can
+    // carry script, and it would run on the embed origin ADAPT trusts.
+    contentWhitelist:
+      "json png jpg jpeg gif bmp tif tiff eot ttf woff woff2 otf webm mp4 ogg mp3 m4a wav txt pdf rtf doc docx xls xlsx ppt pptx odt ods odp xml csv diff patch md textile vtt webvtt gltf glb",
   });
+
+  /**
+   * Replaces Lumi's default, which allows everything. Public reads stay
+   * public; every write needs a capability token. Installed even with
+   * authoring off, so turning the editor routes on can never expose Lumi's
+   * allow-all default.
+   */
+  const permissionSystem = new CapabilityPermissionSystem();
 
   const editor = new H5P.H5PEditor(
     new H5P.fsImplementations.InMemoryStorage(),
     h5pConfig,
     libraryStorage,
     contentStorage,
-    temporaryStorage
+    temporaryStorage,
+    undefined,
+    undefined,
+    { permissionSystem }
   );
 
   const player = new H5P.H5PPlayer(
     editor.libraryStorage,
     editor.contentStorage,
-    h5pConfig
+    h5pConfig,
+    undefined,
+    undefined,
+    undefined,
+    { permissionSystem }
   );
 
   // Return the model rather than HTML. The renderer is player-wide state, so
   // formatting inside it would make the output of concurrent requests depend on
-  // whichever one set it last. Routes format the model themselves.
+  // whichever one set it last. Routes format the model themselves. The same
+  // holds for the editor's renderer.
   player.setRenderer((model) => model);
+  editor.setRenderer((model: any) => model);
 
   log.info(
     {
