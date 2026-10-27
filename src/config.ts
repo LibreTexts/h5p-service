@@ -58,10 +58,12 @@ const config = {
   /**
    * Public origin this service answers on.
    *
-   * Used for startup logging and operator diagnostics only. The embed document
-   * deliberately emits same-origin relative URLs (see `embed/renderer.ts`), so
-   * a wrong value here does not break published embeds. It is required so that
-   * every deployment states its own identity rather than inheriting one.
+   * The embed document itself emits same-origin relative URLs (see
+   * `embed/renderer.ts`), so a wrong value here cannot break an embed loading.
+   * It does reach readers in one place: the code H5P's Embed button offers for
+   * pasting elsewhere is absolute and built from this origin. Production must
+   * set it to `https://studio.libretexts.org`. It is required so that every
+   * deployment states its own identity rather than inheriting one.
    *
    * The production URL contract is documented in the README, not enforced here.
    */

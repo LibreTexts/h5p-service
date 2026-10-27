@@ -30,6 +30,7 @@ process.env.EMBED_BADGE_LABEL ||= "Powered by Example";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const { renderEmbed } = await import("../dist/embed/renderer.js");
+const { displayOptionsForView } = await import("../dist/embed/displayOptions.js");
 const { requiredCspSourceList } = await import("../dist/config/env.js");
 const config = (await import("../dist/config.js")).default;
 const legacyRouter = (await import("../dist/routes/legacy.js")).default;
@@ -68,16 +69,21 @@ function check(name, ok, detail) {
   if (!ok) failures += 1;
 }
 
-const legacy = await fetch(
-  `${base}/modules/custom/h5p/vendor/h5p/h5p-core/js/h5p-resizer.js`,
-  { redirect: "manual" }
-);
-check("legacy resizer path returns 301", legacy.status === 301, `got ${legacy.status}`);
-check(
-  "legacy resizer redirects to core path",
-  legacy.headers.get("location") === "/h5p/core/js/h5p-resizer.js",
-  legacy.headers.get("location")
-);
+// `custom` is in every published embed snippet. `contrib` is hardcoded in
+// ADAPT's H5PResizer.js. Literal strings rather than the router's own list, so
+// a path dropped from legacy.ts fails here instead of passing silently.
+for (const variant of ["custom", "contrib"]) {
+  const legacy = await fetch(
+    `${base}/modules/${variant}/h5p/vendor/h5p/h5p-core/js/h5p-resizer.js`,
+    { redirect: "manual" }
+  );
+  check(`legacy ${variant} resizer path returns 301`, legacy.status === 301, `got ${legacy.status}`);
+  check(
+    `legacy ${variant} resizer redirects to core path`,
+    legacy.headers.get("location") === "/h5p/core/js/h5p-resizer.js",
+    legacy.headers.get("location")
+  );
+}
 
 const resizer = await fetch(`${base}/h5p/core/js/h5p-resizer.js`);
 const resizerBody = await resizer.text();
@@ -114,6 +120,110 @@ for (const token of [
   "Photosynthesis Quiz",
 ]) {
   check(`embed html contains ${token}`, html.includes(token));
+}
+
+// The action bar. Lumi defaults every option off, which hid the bar, and the
+// license it carries, on every migrated embed. Studio's disabled_features bits:
+// 1 frame, 2 download, 4 embed, 8 copyright.
+{
+  const all = displayOptionsForView(undefined);
+  check(
+    "action bar defaults on for content with no stored options",
+    all.showFrame && all.showDownloadButton && all.showEmbedButton && all.showLicenseButton && all.showH5PIcon
+  );
+  check("copy button stays off for anonymous viewers", all.showCopyButton === false);
+  const noDownloadNoEmbed = displayOptionsForView(2 | 4);
+  check(
+    "disabled_features 6 hides download and embed only",
+    noDownloadNoEmbed.showFrame && !noDownloadNoEmbed.showDownloadButton &&
+      !noDownloadNoEmbed.showEmbedButton && noDownloadNoEmbed.showLicenseButton
+  );
+  check("disabled_features 1 hides the frame", displayOptionsForView(1).showFrame === false);
+  check("disabled_features 8 hides the license button", displayOptionsForView(8).showLicenseButton === false);
+  check("the H5P icon ignores bit 16, as H5P core does", displayOptionsForView(16).showH5PIcon === true);
+
+  const withCode = renderEmbed(
+    {
+      ...model,
+      integration: {
+        ...model.integration,
+        contents: { "cid-12345": { metadata: { title: 'Quiz "A" <b>', defaultLanguage: "es" } } },
+      },
+    },
+    "en",
+    { embedCode: true }
+  );
+  // JSON.parse undoes the renderer's script-safe escaping itself.
+  const marker = "window.H5PIntegration = ";
+  const start = withCode.indexOf(marker) + marker.length;
+  const integration = JSON.parse(withCode.slice(start, withCode.indexOf(";</script>", start)));
+  const content = integration.contents["cid-12345"];
+  check(
+    "Embed button code points at the public embed URL",
+    content.embedCode?.includes(`src="${process.env.BASE_URL}/h5p/12345/embed"`),
+    content.embedCode
+  );
+  check("Embed button code keeps H5P's size placeholders", content.embedCode?.includes('width=":w" height=":h"'));
+  check("Embed button code escapes the title", content.embedCode?.includes('title="Quiz &quot;A&quot; &lt;b&gt;"'), content.embedCode);
+  check("Embed button code carries the content language", content.embedCode?.includes('lang="es"'));
+  check(
+    "Embed button resize code uses the canonical resizer path",
+    content.resizeCode === `<script src="${process.env.BASE_URL}/h5p/core/js/h5p-resizer.js" charset="UTF-8"></script>`,
+    content.resizeCode
+  );
+  check("no embed code when the Embed button is hidden", !html.includes("embedCode"));
+
+  // Studio preloaded an empty state, so H5P never requested
+  // /h5p/contentUserData/{id}/state/0, which this service does not serve.
+  check(
+    "an empty saved state is preloaded, as Studio did",
+    JSON.stringify(content.contentUserData) === JSON.stringify([{ state: "{}" }]),
+    content.contentUserData
+  );
+  const withState = renderEmbed(
+    {
+      ...model,
+      integration: {
+        ...model.integration,
+        contents: { "cid-12345": { metadata: {}, contentUserData: [{ state: '{"a":1}' }] } },
+      },
+    },
+    "en"
+  );
+  check("a state already supplied is kept", withState.includes('"state":"{\\"a\\":1}"'));
+
+  // Studio's PHP core served files referenced from other activities' folders
+  // out of the activity's own folder. 197 migrated activities depend on it.
+  const { stripClimbingPath } = await import("../dist/embed/legacyPaths.js");
+  for (const [input, expected] of [
+    ["../content/21078/images/a.jpeg", "images/a.jpeg"],
+    ["../21078/images/a.jpeg", "images/a.jpeg"],
+    ["../../content/21078/videos/b.mp4", "videos/b.mp4"],
+    ["../editor/images/c.png", "images/c.png"],
+    ["../10421/https://example.org/d.png", "https://example.org/d.png"],
+    ["images/a.jpeg", "images/a.jpeg"],
+    ["https://example.org/../e.png", "https://example.org/../e.png"],
+    ["../not-an-id/f.png", "../not-an-id/f.png"],
+  ]) {
+    check(`climbing path ${input} is served as ${expected}`, stripClimbingPath(input) === expected, stripClimbingPath(input));
+  }
+  const climbing = renderEmbed(
+    {
+      ...model,
+      integration: {
+        ...model.integration,
+        contents: {
+          "cid-12345": {
+            metadata: {},
+            jsonContent: JSON.stringify({ image: { path: "../content/21078/images/a.jpeg" }, text: "../content/9/not-a-path" }),
+          },
+        },
+      },
+    },
+    "en"
+  );
+  check("the embed page serves climbing paths from the activity's own folder", climbing.includes('\\"path\\":\\"images/a.jpeg\\"'));
+  check("only `path` values are rewritten", climbing.includes("../content/9/not-a-path"));
 }
 
 // Each of these proves a configured value reaches the embed client, which is

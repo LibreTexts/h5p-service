@@ -3,6 +3,7 @@ import type { IPlayerModel } from "@lumieducation/h5p-server";
 import type { H5PStack } from "../h5p.js";
 import { anonymousUser } from "../h5p.js";
 import { renderEmbed, renderUnavailable } from "../embed/renderer.js";
+import { displayOptionsForView } from "../embed/displayOptions.js";
 import config from "../config.js";
 import { childLogger } from "../logger.js";
 
@@ -48,16 +49,24 @@ export default function embedRouter(stack: H5PStack): Router {
       try {
         // The player's renderer is configured once at startup to return the
         // model, so formatting here stays per-request.
+        // The action bar buttons the author chose in Studio. See
+        // embed/displayOptions.ts for why this cannot be left to Lumi's defaults.
+        const displayOptions = displayOptionsForView(
+          await stack.contentStorage.getDisabledFeatures(contentId)
+        );
         const model = (await stack.player.render(
           contentId,
           anonymousUser(),
           language,
           // Access is decided by Conductor, which owns the activity record.
           // Studio applied no check here at all; see `anonymousUser`.
-          { ignoreUserPermissions: true }
+          { ignoreUserPermissions: true, ...displayOptions }
         )) as IPlayerModel;
 
-        res.status(200).type("html").send(renderEmbed(model, language));
+        res
+          .status(200)
+          .type("html")
+          .send(renderEmbed(model, language, { embedCode: displayOptions.showEmbedButton }));
       } catch (err) {
         // A missing or unreadable content id is an expected outcome for an
         // embed whose activity was deleted, not a server fault.
