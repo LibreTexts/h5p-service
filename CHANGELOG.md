@@ -1,3 +1,10 @@
+## [0.4.2](https://github.com/LibreTexts/h5p-service/compare/v0.4.1...v0.4.2) (2026-10-27)
+
+
+### Bug Fixes
+
+* **embed:** remove the #tmp suffix from file paths as Studio's validator did ([d86fbce](https://github.com/LibreTexts/h5p-service/commit/d86fbce8318128e54fb932271bd667ff8e3eb706)), closes [#tmp](https://github.com/LibreTexts/h5p-service/issues/tmp)
+
 ## [0.4.1](https://github.com/LibreTexts/h5p-service/compare/v0.4.0...v0.4.1) (2026-10-27)
 
 
