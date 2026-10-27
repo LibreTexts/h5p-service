@@ -73,6 +73,11 @@ INSERT INTO h5p_content
  (777,1,'{not valid json','Broken Parameters',NULL,NULL,NULL,NULL,NULL,'CC BY','4.0',NULL,NULL,NULL,'en'),
  (888,99,'{"ok":true}','Missing Library',NULL,NULL,NULL,NULL,NULL,'CC BY','4.0',NULL,NULL,NULL,'en');
 
+-- The author of 101 switched off Download (2) and Embed (4) in Studio, so its
+-- embed must show the action bar without those two buttons. 31483 keeps the
+-- default 0 and shows everything.
+UPDATE h5p_content SET disabled_features = 6 WHERE id = 101;
+
 INSERT INTO h5p_content_libraries (content_id, library_id, dependency_type, drop_css, weight) VALUES
  (101,1,'preloaded',0,1),
  (101,3,'preloaded',0,2),

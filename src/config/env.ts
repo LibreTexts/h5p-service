@@ -231,3 +231,13 @@ export function loadStudioMysqlConfig(): StudioMysqlConfig {
     database: required("STUDIO_MYSQL_DATABASE"),
   };
 }
+/**
+ * Reads the HMAC key the migration pseudonymises identities with.
+ *
+ * Required whenever the migration runs without `--with-identities`, which is
+ * the default. Length is checked by `StudioPseudonymizer` itself so the rule
+ * lives next to the code that depends on it.
+ */
+export function loadStudioPseudonymSalt(): string {
+  return required("STUDIO_PSEUDONYM_SALT");
+}
