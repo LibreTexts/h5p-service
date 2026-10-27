@@ -187,7 +187,7 @@ r = await call("POST", `/h5p/${contentId}/save`, {
   headers: await auth(["edit"], contentId),
 });
 check("a first save into an allocated id succeeds, above the 2 MB global limit", r.status === 200 && r.body.contentId === contentId, `${r.status} ${JSON.stringify(r.body).slice(0, 160)}`);
-check("save returns the metadata Conductor needs", r.body.title === "Verify activity" && r.body.license === "CC BY" && r.body.library === "H5P.VerifyText 1.0");
+check("save returns the metadata Conductor needs", r.body.title === "Verify activity" && r.body.license === "CC BY" && r.body.library === "H5P.VerifyText 1.0" && r.body.libraryTitle === "Verify Text");
 check("save returns the stored display options", JSON.stringify(r.body.displayOptions) === JSON.stringify({ frame: true, download: false, embed: true, copyright: true }));
 
 const files = await s3.send(new ListObjectsV2Command({ Bucket: `${RUN}-content`, Prefix: `${contentId}/` }));

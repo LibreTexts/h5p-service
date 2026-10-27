@@ -25,6 +25,24 @@ function parseUbername(value: string): { machineName: string; majorVersion: numb
   return m ? { machineName: m[1], majorVersion: Number(m[2]), minorVersion: Number(m[3]) } : null;
 }
 
+/**
+ * The display title from the library's library.json, e.g. "Interactive Video".
+ * Conductor stores it as the activity's content type, which ADAPT reads to
+ * recognise Interactive Video and Question Set. Undefined when the library is
+ * not installed, so a lookup failure never fails a save that already succeeded.
+ */
+async function libraryTitleOf(stack: H5PStack, library: string): Promise<string | undefined> {
+  const name = parseUbername(library);
+  if (!name) return undefined;
+  try {
+    const installed = await stack.editor.libraryManager.getLibrary(name);
+    return installed?.title || undefined;
+  } catch (err) {
+    log.warn({ err, library }, "Could not read the library title");
+    return undefined;
+  }
+}
+
 /** The user set by the request-user middleware in index.ts. */
 function userOf(req: Request): CapabilityUser | undefined {
   return (req as unknown as { user?: CapabilityUser }).user;
@@ -195,11 +213,13 @@ export default function authoringRouter(stack: H5PStack): Router {
           await stack.contentStorage.setDisabledFeatures(contentId, disabledFeatures);
         }
         const stored = await stack.contentStorage.getDisabledFeatures(contentId);
+        const libraryTitle = await libraryTitleOf(stack, library);
         log.info({ contentId, sub: user.capability?.subject, jti: user.capability?.tokenId }, "Content saved");
         res.json({
           contentId: saved.id,
           title: saved.metadata.title,
           library,
+          libraryTitle,
           license: saved.metadata.license,
           licenseVersion: saved.metadata.licenseVersion,
           authors: saved.metadata.authors ?? [],

@@ -14,7 +14,7 @@
  *           redirect, and both Drupal-shaped resizer paths still 301
  *
  *   npx tsx --env-file=.env src/migrations/verifyStudioImport.ts \
- *     [--sample=200 | --sample=all] [--ids=101,102] [--base-url=https://staging.studio.libretexts.org]
+ *     [--sample=200 | --sample=all] [--ids=101,102] [--base-url=https://studio-staging.libretexts.org]
  *
  * The sample takes one activity per main library first, so every content type
  * gets looked at, then fills out evenly across the id range. Studio rows the

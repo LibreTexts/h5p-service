@@ -248,6 +248,7 @@
               contentId: r.body.contentId,
               title: r.body.title,
               library: r.body.library,
+              libraryTitle: r.body.libraryTitle,
               license: r.body.license,
               licenseVersion: r.body.licenseVersion,
               authors: r.body.authors,
