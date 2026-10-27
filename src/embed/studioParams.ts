@@ -4,12 +4,17 @@ import { stripClimbingPath } from "./legacyPaths.js";
  * Content parameters as Studio served them to the player.
  *
  * Studio's PHP core ran every activity's parameters through its content
- * validator before rendering, and two of the validator's side effects are
+ * validator before rendering, and three of the validator's side effects are
  * load-bearing for migrated content. Lumi serves stored parameters as they
- * are, so this reproduces both:
+ * are, so this reproduces them:
  *
  * - File paths that climb into another activity's folder are served from the
  *   activity's own folder. See `legacyPaths.ts`.
+ * - A file path's `#tmp` suffix is removed. Studio's editor marks unsaved
+ *   uploads with it and sometimes saved it, though the file sits in the
+ *   activity's folder. H5P's player cannot resolve a `#tmp` path outside the
+ *   editor, so the image, audio or video requests `undefined` and is missing.
+ *   Measured 2026-10-27: 3,592 such paths in 1,496 activities.
  * - A library slot the author left empty (`{"params":{}}`, no `library`) is
  *   removed. Most content types tolerate the empty slot, but H5P.Column with
  *   separators on reads `library.split` and throws, which blanks the whole
@@ -52,11 +57,13 @@ function filter(value: unknown, key: string | undefined, changed: { yes: boolean
     }
     return out;
   }
-  if (key === "path" && typeof value === "string" && value.startsWith("../")) {
-    const stripped = stripClimbingPath(value);
-    if (stripped !== value) {
+  if (key === "path" && typeof value === "string") {
+    // The order H5P's PHP core used: climbing prefix first, then the suffix.
+    let path = value.startsWith("../") ? stripClimbingPath(value) : value;
+    if (path.endsWith("#tmp")) path = path.slice(0, -"#tmp".length);
+    if (path !== value) {
       changed.yes = true;
-      return stripped;
+      return path;
     }
   }
   return value;
@@ -67,7 +74,7 @@ function filter(value: unknown, key: string | undefined, changed: { yes: boolean
  * input string itself when nothing changed.
  */
 export function studioFilteredParams(json: string): string {
-  if (!json.includes('"../') && !json.includes('"params"')) return json;
+  if (!json.includes('"../') && !json.includes('#tmp"') && !json.includes('"params"')) return json;
   const changed = { yes: false };
   const filtered = filter(JSON.parse(json), undefined, changed);
   return changed.yes ? JSON.stringify(filtered) : json;

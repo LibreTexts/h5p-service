@@ -56,12 +56,6 @@ const PRINT_LIMIT = 20;
  */
 const KNOWN: { pattern: RegExp; reason: string }[] = [
   {
-    // MemoryGame and ImageHotspotQuestion assign an unset image src, which
-    // resolves against the embed page. Nothing visible is missing.
-    pattern: /^404 \S+\/h5p\/\d+\/undefined$/,
-    reason: "content type requests 'undefined'",
-  },
-  {
     // Studio's embed code never granted the camera, so AR content could not
     // use it inside a textbook either.
     pattern: /Permissions policy violation: camera is not allowed/,
