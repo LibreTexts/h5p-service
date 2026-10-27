@@ -231,6 +231,7 @@ export function loadStudioMysqlConfig(): StudioMysqlConfig {
     database: required("STUDIO_MYSQL_DATABASE"),
   };
 }
+
 /**
  * Reads the HMAC key the migration pseudonymises identities with.
  *
@@ -240,4 +241,50 @@ export function loadStudioMysqlConfig(): StudioMysqlConfig {
  */
 export function loadStudioPseudonymSalt(): string {
   return required("STUDIO_PSEUDONYM_SALT");
+}
+
+/** A public Ed25519 key in JWK form, as `CAPABILITY_TOKEN_PUBLIC_KEYS` holds. */
+export type Ed25519PublicJwk = { kty: "OKP"; crv: "Ed25519"; x: string; kid: string };
+
+/**
+ * Reads a JWK set of public Ed25519 keys: `{"keys":[{"kty":"OKP","crv":"Ed25519","x":"...","kid":"..."}]}`.
+ *
+ * Every key needs a `kid`, because tokens name their signing key and rotation
+ * keeps two keys configured at once. A key carrying `d`, the private part, is
+ * refused outright: this service only verifies, and a private key in its
+ * environment would let anyone who can read that environment mint edit
+ * rights.
+ */
+export function requiredEd25519PublicKeySet(name: string): Ed25519PublicJwk[] {
+  const raw = required(name);
+  let parsed: any;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`${name} must be a JSON Web Key Set, got unparseable JSON`);
+  }
+  const keys = parsed?.keys;
+  if (!Array.isArray(keys) || keys.length === 0) {
+    throw new Error(`${name} must be a JSON Web Key Set with at least one key in "keys"`);
+  }
+  const kids = new Set<string>();
+  return keys.map((key: any, i: number) => {
+    if (key && "d" in key) {
+      throw new Error(`${name} key ${i} contains a private key ("d"). Configure the public key only.`);
+    }
+    if (key?.kty !== "OKP" || key?.crv !== "Ed25519") {
+      throw new Error(`${name} key ${i} must be an Ed25519 key (kty "OKP", crv "Ed25519")`);
+    }
+    if (typeof key.x !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(key.x)) {
+      throw new Error(`${name} key ${i} has no valid "x" (43 base64url characters)`);
+    }
+    if (typeof key.kid !== "string" || !/^[A-Za-z0-9._-]{1,64}$/.test(key.kid)) {
+      throw new Error(`${name} key ${i} needs a "kid" of 1 to 64 letters, digits, ".", "_" or "-"`);
+    }
+    if (kids.has(key.kid)) {
+      throw new Error(`${name} has two keys with kid "${key.kid}"`);
+    }
+    kids.add(key.kid);
+    return { kty: "OKP", crv: "Ed25519", x: key.x, kid: key.kid };
+  });
 }
