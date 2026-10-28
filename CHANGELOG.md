@@ -1,3 +1,10 @@
+## [0.4.6](https://github.com/LibreTexts/h5p-service/compare/v0.4.5...v0.4.6) (2026-10-28)
+
+
+### Bug Fixes
+
+* **config:** support wildcard editor parent origins ([9e2d3bd](https://github.com/LibreTexts/h5p-service/commit/9e2d3bd0f44ecb5b4a3cac346e8c894812332684))
+
 ## [0.4.5](https://github.com/LibreTexts/h5p-service/compare/v0.4.4...v0.4.5) (2026-10-27)
 
 
