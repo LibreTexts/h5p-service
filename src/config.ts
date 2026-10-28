@@ -7,6 +7,7 @@ import {
   requiredHostList,
   requiredOrigin,
   requiredOriginList,
+  requiredOriginPatternList,
   requiredRegion,
   required,
   assertPairedAwsCredentials,
@@ -130,9 +131,10 @@ const config = {
      * Conductor's origins: the only pages allowed to frame the editor and to
      * exchange messages with it. Required only when authoring is on. Narrower
      * than `EMBED_FRAME_ANCESTORS` on purpose: anyone may embed an activity,
-     * but only Conductor may host its editor.
+     * but only Conductor may host its editor. Entries may be `https://*.host`
+     * patterns, which editor-page.js resolves before posting to one.
      */
-    parentOrigins: authoringEnabled ? requiredOriginList("EDITOR_PARENT_ORIGINS") : [],
+    parentOrigins: authoringEnabled ? requiredOriginPatternList("EDITOR_PARENT_ORIGINS") : [],
   },
 
   embed: {

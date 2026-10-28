@@ -19,6 +19,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import vm from "node:vm";
 import { S3, CreateBucketCommand, DeleteBucketCommand, ListObjectsV2Command, DeleteObjectsCommand } from "@aws-sdk/client-s3";
 import { MongoClient } from "mongodb";
 import { SignJWT, exportJWK, generateKeyPair } from "jose";
@@ -29,6 +30,9 @@ const S3_KEY = process.env.TEST_S3_ACCESS_KEY_ID || "minioadmin";
 const S3_SECRET = process.env.TEST_S3_SECRET_ACCESS_KEY || "minioadmin";
 const RUN = `verify-authoring-${Date.now()}`;
 const CONDUCTOR = "https://conductor.example.test";
+// Wildcard first, as production lists it: a pattern ahead of the exact origin
+// once made the editor's first postMessage throw and the handshake never start.
+const CAMPUSES = "https://*.campus.example.test";
 
 const keys = await generateKeyPair("EdDSA", { crv: "Ed25519", extractable: true });
 const jwk = { ...(await exportJWK(keys.publicKey)), kid: "verify-1" };
@@ -51,7 +55,7 @@ Object.assign(process.env, {
   EMBED_TRUSTED_PARENT_HOSTS: "trusted.example.test",
   AUTHORING_ENABLED: "true",
   CAPABILITY_TOKEN_PUBLIC_KEYS: JSON.stringify({ keys: [jwk] }),
-  EDITOR_PARENT_ORIGINS: CONDUCTOR,
+  EDITOR_PARENT_ORIGINS: `${CAMPUSES},${CONDUCTOR}`,
   LOG_LEVEL: process.env.LOG_LEVEL || "silent",
 });
 
@@ -117,16 +121,85 @@ function integrationOf(html, contentId) {
 // ---------------------------------------------------------- editor page
 let r = await call("GET", "/h5p/new/edit");
 check("new-activity editor page is served without a token", r.status === 200);
-check("only Conductor may frame the editor", r.headers.get("content-security-policy") === `frame-ancestors ${CONDUCTOR}`, r.headers.get("content-security-policy"));
+check("only Conductor may frame the editor", r.headers.get("content-security-policy") === `frame-ancestors ${CAMPUSES} ${CONDUCTOR}`, r.headers.get("content-security-policy"));
 check("the editor page is never cached", r.headers.get("cache-control") === "no-store");
 const pageIntegration = integrationOf(r.body);
 check("the token wrapper is the inner iframe's first script", pageIntegration.editor.assets.js[0] === "/h5p/editor-auth.js");
 check("the token wrapper also loads in the page itself", r.body.includes('<script src="/h5p/editor-auth.js"></script>'));
-check("the page knows Conductor's origin for messages", r.body.includes(`"parentOrigins":["${CONDUCTOR}"]`));
+check("the page knows Conductor's origin for messages", r.body.includes(`"parentOrigins":["${CAMPUSES}","${CONDUCTOR}"]`));
 r = await call("GET", "/h5p/99999/edit");
 check("the editor page for unknown content is a 404", r.status === 404);
 r = await call("GET", "/h5p/editor-page.js");
 check("the editor protocol script is served", r.status === 200 && String(r.body).includes('type: "ready"'));
+
+/**
+ * Runs editor-page.js against a stand-in parent that throws on an invalid
+ * target origin, as browsers do, and records where each message went.
+ */
+function runEditorPage(script, { ancestor, referrer }) {
+  const posted = [];
+  const listeners = [];
+  const parent = {
+    postMessage(message, target) {
+      let origin;
+      try {
+        origin = new URL(target).origin;
+        if (origin.includes("*")) throw new Error();
+      } catch {
+        throw new SyntaxError(`Invalid target origin '${target}'`);
+      }
+      posted.push({ type: message.type, target: origin });
+    },
+  };
+  const win = {
+    __LIBRETEXTS_EDITOR__: { parentOrigins: [CAMPUSES, CONDUCTOR], contentId: "1" },
+    __LIBRETEXTS_PARENT__: parent,
+    location: { ancestorOrigins: ancestor ? [ancestor] : undefined },
+    addEventListener: (type, fn) => type === "message" && listeners.push(fn),
+  };
+  win.window = win;
+  let thrown = null;
+  try {
+    vm.runInContext(script, vm.createContext({ window: win, document: { referrer: referrer ?? "" }, URL, atob, setTimeout, clearTimeout, setInterval, clearInterval }));
+  } catch (err) {
+    thrown = err;
+  }
+  const deliver = (origin, data) => listeners.forEach((fn) => fn({ origin, data }));
+  return { posted, thrown, deliver };
+}
+const editorScript = String(r.body);
+let page = runEditorPage(editorScript, { ancestor: CONDUCTOR });
+check("a wildcard parent origin does not stop the editor script", page.thrown === null, page.thrown?.message);
+check("ready reaches Conductor past a wildcard entry", page.posted.some((m) => m.type === "ready" && m.target === CONDUCTOR), JSON.stringify(page.posted));
+check("no message is aimed at a wildcard", page.posted.every((m) => !m.target.includes("*")));
+const campus = "https://east.campus.example.test";
+page = runEditorPage(editorScript, { ancestor: campus });
+check("ready reaches a campus parent named by ancestorOrigins", page.posted.some((m) => m.type === "ready" && m.target === campus));
+page = runEditorPage(editorScript, { referrer: `${campus}/h5p/1/edit` });
+check("ready reaches a campus parent named by the referrer", page.posted.some((m) => m.type === "ready" && m.target === campus));
+page = runEditorPage(editorScript, { ancestor: "https://elsewhere.example.test" });
+check("an unlisted framer is not announced to", page.posted.every((m) => m.target !== "https://elsewhere.example.test"));
+const before = page.posted.length;
+page.deliver("https://campus.example.test.evil.test", { type: "save", requestId: "x" });
+page.deliver("https://evilcampus.example.test", { type: "save", requestId: "x" });
+check("lookalike origins are ignored", page.posted.length === before);
+page.deliver(campus, { type: "save", requestId: "y" });
+check("a campus origin matching the pattern is answered", page.posted.some((m) => m.type === "save-failed" && m.target === campus));
+
+const { requiredOriginPatternList } = await import("../dist/config/env.js");
+const patternFor = (value) => {
+  process.env.VERIFY_ORIGIN_PATTERN = value;
+  try {
+    return requiredOriginPatternList("VERIFY_ORIGIN_PATTERN");
+  } catch {
+    return null;
+  } finally {
+    delete process.env.VERIFY_ORIGIN_PATTERN;
+  }
+};
+check("a leading-label wildcard is accepted", JSON.stringify(patternFor(`${CAMPUSES},${CONDUCTOR}`)) === JSON.stringify([CAMPUSES, CONDUCTOR]));
+check("a wildcard inside a label is refused", patternFor("https://a*b.example.test") === null);
+check("a wildcard past the first label is refused", patternFor("https://east.*.example.test") === null);
 
 // ---------------------------------------------------------- allocate
 r = await call("POST", "/h5p/service/allocate");

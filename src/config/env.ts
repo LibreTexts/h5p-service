@@ -129,6 +129,31 @@ export function requiredOriginList(name: string): string[] {
   return requiredList(name).map((entry) => toOrigin(name, entry));
 }
 
+const ORIGIN_PATTERN =
+  /^https?:\/\/\*\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+(?::\d{1,5})?$/;
+
+/**
+ * Origins that may also be `scheme://*.host` patterns, matching any subdomain
+ * of host the way CSP's frame-ancestors does. Exact entries go through
+ * `toOrigin`. A wildcard anywhere else is refused: the URL parser accepts `*`
+ * in a host, so without this check `https://a*b.org` would pass as an origin.
+ *
+ * Patterns are never valid postMessage target origins, so code that posts
+ * must resolve one to a concrete origin first (public/editor-page.js).
+ */
+export function requiredOriginPatternList(name: string): string[] {
+  return requiredList(name).map((entry) => {
+    if (!entry.includes("*")) return toOrigin(name, entry);
+    if (!ORIGIN_PATTERN.test(entry)) {
+      throw new Error(
+        `${name} contains an invalid origin pattern: "${entry}". ` +
+          `A wildcard is allowed only as the first label, as in https://*.example.org`
+      );
+    }
+    return entry.toLowerCase();
+  });
+}
+
 /**
  * A CSP source expression: `'self'`, `'none'`, `*`, or a scheme-host with an
  * optional leading `*.` wildcard and optional port.

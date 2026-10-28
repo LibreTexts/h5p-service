@@ -111,7 +111,7 @@ so a default would be inherited silently by a fork.
 | `EMBED_BADGE_LOGO_URL` | unset | Badge logo. |
 | `EMBED_BADGE_LABEL` | unset | Badge text and link title. |
 | `AUTHORING_ENABLED` | `false` | `true` accepts Conductor-signed capability tokens for H5P authoring. Off, every request is anonymous and an Authorization header is ignored. Keep it off in production until Studio authoring is frozen and the id counter re-seeded. |
-| `EDITOR_PARENT_ORIGINS` | unset | Required when `AUTHORING_ENABLED=true`. Conductor's origins, comma-separated: the only pages that may frame the editor (`frame-ancestors`) and exchange messages with it. Narrower than `EMBED_FRAME_ANCESTORS` on purpose. |
+| `EDITOR_PARENT_ORIGINS` | unset | Required when `AUTHORING_ENABLED=true`. Conductor's origins, comma-separated: the only pages that may frame the editor (`frame-ancestors`) and exchange messages with it. An entry may be a `https://*.host` pattern for campus instances. Narrower than `EMBED_FRAME_ANCESTORS` on purpose. |
 | `CAPABILITY_TOKEN_PUBLIC_KEYS` | unset | Required when `AUTHORING_ENABLED=true`. Conductor's Ed25519 public keys as a JWK set, each with a `kid`: `{"keys":[{"kty":"OKP","crv":"Ed25519","x":"...","kid":"..."}]}`. Not secret. A key carrying `d` (a private key) is refused at startup. List two keys while rotating. |
 
 `STUDIO_MYSQL_*` are read only by the migration, lazily, so the service never

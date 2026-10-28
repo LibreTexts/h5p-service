@@ -40,6 +40,68 @@
   var LOAD_POLL_MS = 50;
   var EXPIRY_WARNING_MS = 2 * 60 * 1000;
 
+  /**
+   * Whether an origin is one of EDITOR_PARENT_ORIGINS. An entry is an exact
+   * origin or a `scheme://*.host` pattern, which matches any subdomain of host
+   * as CSP's frame-ancestors does.
+   */
+  function isAllowedOrigin(origin) {
+    if (typeof origin !== "string" || !origin) return false;
+    for (var i = 0; i < allowedOrigins.length; i++) {
+      var entry = allowedOrigins[i];
+      var star = entry.indexOf("://*.");
+      if (star === -1) {
+        if (entry === origin) return true;
+        continue;
+      }
+      var prefix = entry.slice(0, star + 3); // "https://"
+      var suffix = entry.slice(star + 4); // ".commons.libretexts.org"
+      if (origin.indexOf(prefix) !== 0) continue;
+      var host = origin.slice(prefix.length);
+      var sub = host.slice(0, host.length - suffix.length);
+      if (host.length > suffix.length && host.slice(-suffix.length) === suffix && /^[A-Za-z0-9.-]+$/.test(sub)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * The framing page's origin, when the browser reveals it: ancestorOrigins
+   * where supported, else the referrer, which carries the origin under the
+   * default referrer policy. Only used if it passes isAllowedOrigin.
+   */
+  function framingOrigin() {
+    try {
+      var ancestors = window.location.ancestorOrigins;
+      if (ancestors && ancestors.length) return ancestors[0];
+    } catch (e) {
+      /* not supported */
+    }
+    try {
+      if (document.referrer) return new URL(document.referrer).origin;
+    } catch (e) {
+      /* no usable referrer */
+    }
+    return null;
+  }
+
+  /**
+   * Where to announce before the parent has spoken. Wildcard entries are not
+   * valid postMessage target origins (postMessage throws a SyntaxError), so
+   * they are reached only through the framing origin, once it matches one.
+   */
+  var announceTargets = (function () {
+    var targets = [];
+    var framing = framingOrigin();
+    if (framing && isAllowedOrigin(framing)) targets.push(framing);
+    for (var i = 0; i < allowedOrigins.length; i++) {
+      var entry = allowedOrigins[i];
+      if (entry.indexOf("*") === -1 && targets.indexOf(entry) === -1) targets.push(entry);
+    }
+    return targets;
+  })();
+
   function post(message) {
     if (parentOrigin) {
       conductor.postMessage(message, parentOrigin);
@@ -47,9 +109,14 @@
     }
     // Before the parent has spoken, which allowed origin framed us is unknown.
     // A message to a non-matching target origin is dropped by the browser, so
-    // announcing to each is safe.
-    for (var i = 0; i < allowedOrigins.length; i++) {
-      conductor.postMessage(message, allowedOrigins[i]);
+    // announcing to each is safe. Each post is guarded so one bad target can
+    // never stop the rest.
+    for (var i = 0; i < announceTargets.length; i++) {
+      try {
+        conductor.postMessage(message, announceTargets[i]);
+      } catch (e) {
+        /* invalid target origin; try the next */
+      }
     }
   }
 
@@ -286,7 +353,7 @@
   }
 
   window.addEventListener("message", function (event) {
-    if (allowedOrigins.indexOf(event.origin) === -1) return;
+    if (!isAllowedOrigin(event.origin)) return;
     if (parentOrigin && event.origin !== parentOrigin) return;
     var message = event.data;
     if (!message || typeof message !== "object") return;
