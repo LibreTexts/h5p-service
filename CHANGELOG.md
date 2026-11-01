@@ -1,3 +1,10 @@
+## [0.4.7](https://github.com/LibreTexts/h5p-service/compare/v0.4.6...v0.4.7) (2026-11-01)
+
+
+### Bug Fixes
+
+* **files:** stop stalled downloads from exhausting the S3 socket pool ([46eeda7](https://github.com/LibreTexts/h5p-service/commit/46eeda7817fad8f817f173a77abefdefd8d91882))
+
 ## [0.4.6](https://github.com/LibreTexts/h5p-service/compare/v0.4.5...v0.4.6) (2026-10-28)
 
 
