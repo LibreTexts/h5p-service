@@ -7,6 +7,7 @@ import config from "./config.js";
 import logger from "./logger.js";
 import { anonymousUser, type H5PStack } from "./h5p.js";
 import embedRouter from "./routes/embed.js";
+import fileRouter from "./routes/files.js";
 import legacyRouter from "./routes/legacy.js";
 import { createCapabilityVerifier } from "./auth/capabilityToken.js";
 import { capabilityUserMiddleware } from "./auth/requestUser.js";
@@ -74,9 +75,18 @@ export function createApp(stack: H5PStack): express.Express {
 
   app.use(legacyRouter());
 
+  // Library, content and temporary files, replacing Lumi's routes for them,
+  // which can leave S3 sockets held forever. See routes/files.ts.
+  app.use(
+    "/h5p",
+    fileRouter(stack, {
+      idleTimeoutMs: config.s3.streamIdleTimeoutMs,
+      temporaryFiles: config.authoring.enabled,
+    })
+  );
+
   /**
-   * Core files, library files and content files, plus the editor's own routes
-   * when authoring is on.
+   * Core files, plus the editor's own routes when authoring is on.
    *
    * With authoring off, this is exactly phase 1: serving and embedding.
    * `routeCoreFiles` is what serves `h5p-resizer.js`, so it is required, not
@@ -92,14 +102,14 @@ export function createApp(stack: H5PStack): express.Express {
       {
         handleErrors: true,
         routeCoreFiles: true,
-        routeGetContentFile: true,
-        routeGetLibraryFile: true,
+        routeGetContentFile: false,
+        routeGetLibraryFile: false,
         routeGetDownload: true,
         routeGetParameters: true,
         routeEditorCoreFiles: config.authoring.enabled,
         routeGetAjax: config.authoring.enabled,
         routePostAjax: config.authoring.enabled,
-        routeGetTemporaryContentFile: config.authoring.enabled,
+        routeGetTemporaryContentFile: false,
         routeContentUserData: false,
         routeFinishedData: false,
       }

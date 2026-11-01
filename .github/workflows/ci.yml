@@ -77,3 +77,8 @@ jobs:
       # token verification, and the permissions Lumi is given. No database.
       - name: Verify capability tokens
         run: node scripts/verify-capability-token.mjs
+
+      # Asserts the file routes embeds load through keep their responses and
+      # never leave the S3 socket pool pinned. Fake S3 on localhost, no database.
+      - name: Verify file streaming
+        run: node scripts/verify-file-streaming.mjs

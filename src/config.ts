@@ -93,6 +93,12 @@ const config = {
      */
     endpoint: process.env.AWS_S3_ENDPOINT,
     region: requiredRegion("AWS_REGION"),
+    /**
+     * How long a file download may make no progress before it is closed, so a
+     * reader that stopped reading cannot hold an S3 socket indefinitely. See
+     * `routes/files.ts`.
+     */
+    streamIdleTimeoutMs: optionalInt("S3_STREAM_IDLE_TIMEOUT_MS", 30_000, 1_000, 600_000),
   },
 
   /**

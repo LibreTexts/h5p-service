@@ -98,6 +98,7 @@ so a default would be inherited silently by a fork.
 | `PORT` | `5100` | Listen port. Matches the Dockerfile's `EXPOSE` and healthcheck. |
 | `NODE_ENV` | `development` | One of `development`, `test`, `production`. |
 | `LOG_LEVEL` | `info` in production, else `debug` | A pino level. |
+| `S3_STREAM_IDLE_TIMEOUT_MS` | `30000` | How long a file download may make no progress before it is closed, which frees its S3 socket. |
 | `MONGODB_DB` | `h5p` | Database name. |
 | `MONGODB_CONTENT_COLLECTION` | `h5p_content` | Content records. |
 | `MONGODB_LIBRARY_COLLECTION` | `h5p_libraries` | Library records. |
@@ -168,6 +169,7 @@ should become `:latest`. It is gated by the same authorized-users secret.
 | `npm run fetch:h5p-core` | Re-fetch and verify the H5P client libraries |
 | `npm run verify:embed-contract` | Assert the public contracts above still hold |
 | `npm run verify:capability-token` | Assert token verification and the permission system Lumi is given |
+| `npm run verify:file-streaming` | Assert the file routes keep their responses and never leave the S3 socket pool pinned |
 | `npm run verify:content-storage` | Exercise content storage against a real MongoDB and MinIO |
 | `npm run verify:authoring` | Exercise the authoring routes against a real MongoDB and MinIO, with authoring on |
 | `npm run migrate:studio-content` | One-time import of Studio libraries and content |

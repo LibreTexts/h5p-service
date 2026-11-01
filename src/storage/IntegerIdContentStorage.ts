@@ -67,6 +67,8 @@ export default class IntegerIdContentStorage implements IContentStorage {
   /**
    * @param counters collection holding the id sequence. Separate from the
    * content collection so an id allocation never contends with a content write.
+   * @param options.streamS3 the client file downloads open on, so a full pool
+   * of them cannot stall other S3 calls. See `routes/files.ts`.
    */
   constructor(
     private s3: S3,
@@ -77,6 +79,7 @@ export default class IntegerIdContentStorage implements IContentStorage {
       maxKeyLength?: number;
       s3Acl?: ObjectCannedACL;
       s3Bucket: string;
+      streamS3?: S3;
     }
   ) {
     // Upstream reserves 22 characters of the 1024-byte key budget for the id
@@ -276,7 +279,7 @@ export default class IntegerIdContentStorage implements IContentStorage {
     if (!contentId) {
       throw new H5pError("mongo-s3-content-storage:content-not-found", {}, 404);
     }
-    const object = await this.s3.getObject({
+    const object = await (this.options.streamS3 ?? this.s3).getObject({
       Bucket: this.options.s3Bucket,
       Key: IntegerIdContentStorage.getS3Key(contentId, filename),
       Range:

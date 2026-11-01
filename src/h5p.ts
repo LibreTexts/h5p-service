@@ -1,11 +1,8 @@
 import * as H5P from "@lumieducation/h5p-server";
-import {
-  initMongo,
-  MongoS3LibraryStorage,
-  S3TemporaryFileStorage,
-} from "@lumieducation/h5p-mongos3";
+import { initMongo, S3TemporaryFileStorage } from "@lumieducation/h5p-mongos3";
 import { S3 } from "@aws-sdk/client-s3";
 import IntegerIdContentStorage from "./storage/IntegerIdContentStorage.js";
+import StreamingLibraryStorage from "./storage/StreamingLibraryStorage.js";
 import CapabilityPermissionSystem from "./auth/CapabilityPermissionSystem.js";
 import config from "./config.js";
 import { childLogger } from "./logger.js";
@@ -45,12 +42,21 @@ export async function buildH5P(): Promise<H5PStack> {
    * variables themselves. A deployment that wants static keys still sets the
    * same two variables and the chain's own environment provider picks them up.
    */
-  const s3 = new S3({
+  const s3Options = {
     region: config.s3.region,
     ...(config.s3.endpoint
       ? { endpoint: config.s3.endpoint, forcePathStyle: true }
       : {}),
-  });
+  };
+  const s3 = new S3(s3Options);
+
+  /**
+   * File downloads get their own client, and so their own socket pool. Each
+   * holds a socket for as long as its reader takes, while everything on `s3`
+   * finishes in milliseconds and is what embeds and the editor wait on.
+   * See `routes/files.ts`.
+   */
+  const streamS3 = new S3(s3Options);
 
   const db = await initMongo(config.mongo.url, config.mongo.db);
 
@@ -61,16 +67,19 @@ export async function buildH5P(): Promise<H5PStack> {
     s3,
     db.collection(config.mongo.contentCollection),
     db.collection(config.mongo.counterCollection),
-    { s3Bucket: config.s3.contentBucket }
+    { s3Bucket: config.s3.contentBucket, streamS3 }
   );
 
-  const libraryStorage = new MongoS3LibraryStorage(
+  const libraryStorage = new StreamingLibraryStorage(
     s3,
     db.collection(config.mongo.libraryCollection),
-    { s3Bucket: config.s3.libraryBucket }
+    { s3Bucket: config.s3.libraryBucket },
+    streamS3
   );
 
-  const temporaryStorage = new S3TemporaryFileStorage(s3, {
+  // Wholly on the download client: only the editor uses temporary files, and
+  // its previews must not reach the pool embeds depend on.
+  const temporaryStorage = new S3TemporaryFileStorage(streamS3, {
     s3Bucket: config.s3.temporaryBucket,
   });
 
