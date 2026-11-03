@@ -172,6 +172,9 @@ export function anonymousUser(): H5P.IUser {
 /** How often to check whether the content type cache needs a refresh. */
 const CONTENT_TYPE_CACHE_CHECK_MS = 60 * 60 * 1000;
 
+/** How soon to try again after a refresh failed. */
+const CONTENT_TYPE_CACHE_RETRY_MS = 5 * 60 * 1000;
+
 /**
  * Fills the editor's content type cache from the H5P Hub at boot, then keeps
  * it fresh in the background.
@@ -183,27 +186,36 @@ const CONTENT_TYPE_CACHE_CHECK_MS = 60 * 60 * 1000;
  * `updateIfNecessary` only calls the Hub once Lumi's refresh interval (a day)
  * has passed, and a failed refresh keeps the previous cache. Never awaited, so
  * a slow or unreachable Hub cannot delay startup.
+ *
+ * Lumi's `forceUpdate` swallows every error and reports only that the update
+ * did not happen, so `updateIfNecessary` returns false for both "still fresh"
+ * and "failed". An outdated cache is what tells them apart. The cause goes to
+ * Lumi's own logger, which writes only with `DEBUG=h5p:ContentTypeCache` set.
  */
 export function keepContentTypeCacheWarm(stack: H5PStack): void {
   const cache = stack.editor.contentTypeCache;
-  let running = false;
   const refresh = async (): Promise<void> => {
-    if (running) return;
-    running = true;
     const started = Date.now();
+    let nextCheckMs = CONTENT_TYPE_CACHE_RETRY_MS;
     try {
       const updated = await cache.updateIfNecessary();
       if (updated) {
+        nextCheckMs = CONTENT_TYPE_CACHE_CHECK_MS;
         log.info({ ms: Date.now() - started }, "Content type cache refreshed from the H5P Hub");
-      } else if (!(await cache.getLastUpdate())) {
-        log.warn({ ms: Date.now() - started }, "Content type cache is empty: the H5P Hub could not be reached");
+      } else if (await cache.isOutdated()) {
+        const cacheEmpty = !(await cache.getLastUpdate());
+        log.warn(
+          { ms: Date.now() - started, cacheEmpty, retryInMs: nextCheckMs },
+          "Content type cache refresh failed; set DEBUG=h5p:ContentTypeCache for the cause"
+        );
+      } else {
+        nextCheckMs = CONTENT_TYPE_CACHE_CHECK_MS;
       }
     } catch (err) {
-      log.warn({ err }, "Content type cache refresh failed");
+      log.warn({ err, retryInMs: nextCheckMs }, "Content type cache refresh failed");
     } finally {
-      running = false;
+      setTimeout(() => void refresh(), nextCheckMs).unref();
     }
   };
   void refresh();
-  setInterval(() => void refresh(), CONTENT_TYPE_CACHE_CHECK_MS).unref();
 }
