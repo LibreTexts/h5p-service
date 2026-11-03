@@ -1,3 +1,10 @@
+## [0.4.8](https://github.com/LibreTexts/h5p-service/compare/v0.4.7...v0.4.8) (2026-11-03)
+
+
+### Bug Fixes
+
+* improve Hub cache loading and logging behavior ([ec7ee67](https://github.com/LibreTexts/h5p-service/commit/ec7ee67535d1047474fe5f1e4408b004d57a2b74))
+
 ## [0.4.7](https://github.com/LibreTexts/h5p-service/compare/v0.4.6...v0.4.7) (2026-11-01)
 
 
