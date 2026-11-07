@@ -1,3 +1,10 @@
+# [0.5.0](https://github.com/LibreTexts/h5p-service/compare/v0.4.8...v0.5.0) (2026-11-07)
+
+
+### Features
+
+* **observability:** report S3 socket pools and log downloads, uploads and slow requests ([501b28b](https://github.com/LibreTexts/h5p-service/commit/501b28bcc4c09828850c2af535b46ce07b783ec3))
+
 ## [0.4.8](https://github.com/LibreTexts/h5p-service/compare/v0.4.7...v0.4.8) (2026-11-03)
 
 
