@@ -12,12 +12,19 @@ const log = childLogger("authoring");
 
 /** Studio's ids and everything allocated since: plain positive integers. */
 const CONTENT_ID = "([1-9]\\d{0,15})";
+const WHOLE_CONTENT_ID = new RegExp(`^${CONTENT_ID}$`);
 
 /**
  * Largest save body accepted. Interactive Books and Course Presentations carry
  * several megabytes of parameters; media files travel separately as uploads.
  */
 const SAVE_BODY_LIMIT = "25mb";
+
+/**
+ * Most ids one reconcile may mark private. Production has a few dozen; the
+ * cap keeps a runaway caller from sending an unbounded `$in`.
+ */
+const MAX_PRIVATE_SET = 50_000;
 
 /** "H5P.MultiChoice 1.16" as Lumi's library name, or null. */
 function parseUbername(value: string): { machineName: string; majorVersion: number; minorVersion: number } | null {
@@ -86,6 +93,10 @@ function requireCapability(action: CapabilityAction, matchParam?: string) {
  *   token. Server to server, from Conductor.
  * - `DELETE /service/content/{id}`: deletes content and its files, under a
  *   `delete` token for that id. Server to server, from Conductor.
+ * - `PUT /service/content/{id}/visibility`: marks content private or public,
+ *   under a `visibility` token for that id. Server to server, from Conductor.
+ * - `PUT /service/private-content`: replaces the full set of private content,
+ *   under a `visibility` token with no id. Conductor's reconcile job.
  *
  * The editor's own AJAX routes come from Lumi's router, switched on by the
  * same setting in index.ts. Every write is checked again by
@@ -199,6 +210,9 @@ export default function authoringRouter(stack: H5PStack): Router {
           contentId
         );
         placeholder = true;
+        // Conductor creates activities private, and pushes the real
+        // visibility once this save is reported back. Until then, deny.
+        await stack.contentStorage.setPrivate(contentId, true);
       }
 
       try {
@@ -268,6 +282,77 @@ export default function authoringRouter(stack: H5PStack): Router {
         const status = typeof err?.httpStatusCode === "number" ? err.httpStatusCode : 500;
         log.error({ err, contentId }, "Content delete failed");
         res.status(status).json({ error: err?.errorId || "delete_failed" });
+      }
+    }
+  );
+
+  router.put(
+    `/service/content/:contentId${CONTENT_ID}/visibility`,
+    requireCapability("visibility", "contentId"),
+    express.json({ limit: "1kb" }),
+    async (req: Request, res: Response) => {
+      const { contentId } = req.params;
+      const value = req.body?.private;
+      if (typeof value !== "boolean") {
+        res.status(400).json({ error: "private must be a boolean" });
+        return;
+      }
+      const user = userOf(req) as CapabilityUser;
+      try {
+        await stack.contentStorage.setPrivate(contentId, value);
+        log.info(
+          { contentId, private: value, sub: user.capability?.subject, jti: user.capability?.tokenId },
+          "Content visibility set"
+        );
+        res.status(204).end();
+      } catch (err: any) {
+        if (err?.httpStatusCode === 404) {
+          res.status(404).json({ error: "not_found" });
+          return;
+        }
+        log.error({ err, contentId }, "Setting content visibility failed");
+        res.status(500).json({ error: "visibility_failed" });
+      }
+    }
+  );
+
+  router.put(
+    "/service/private-content",
+    requireCapability("visibility"),
+    express.json({ limit: "2mb" }),
+    async (req: Request, res: Response) => {
+      const user = userOf(req) as CapabilityUser;
+      // A token for one content id must not be able to clear every other.
+      if (user.capability?.contentId !== undefined) {
+        res.status(403).json({ error: "insufficient_scope" });
+        return;
+      }
+      const ids = req.body?.contentIds;
+      if (
+        !Array.isArray(ids) ||
+        ids.length > MAX_PRIVATE_SET ||
+        !ids.every((id) => (typeof id === "number" || typeof id === "string") && WHOLE_CONTENT_ID.test(String(id)))
+      ) {
+        res.status(400).json({ error: `contentIds must be an array of at most ${MAX_PRIVATE_SET} content ids` });
+        return;
+      }
+      try {
+        const result = await stack.contentStorage.replacePrivateSet(ids.map(String));
+        log.info(
+          {
+            requested: ids.length,
+            marked: result.marked,
+            cleared: result.cleared,
+            unknown: result.unknown.length,
+            sub: user.capability?.subject,
+            jti: user.capability?.tokenId,
+          },
+          "Private content set replaced"
+        );
+        res.status(200).json(result);
+      } catch (err) {
+        log.error({ err }, "Replacing the private content set failed");
+        res.status(500).json({ error: "visibility_failed" });
       }
     }
   );

@@ -11,6 +11,7 @@ import fileRouter from "./routes/files.js";
 import legacyRouter from "./routes/legacy.js";
 import { createCapabilityVerifier } from "./auth/capabilityToken.js";
 import { capabilityUserMiddleware } from "./auth/requestUser.js";
+import { createReadGate } from "./auth/privateContent.js";
 import authoringRouter from "./routes/authoring.js";
 import { InFlightRequests, requestLog } from "./observability/requestLog.js";
 import type { PoolMonitor } from "./observability/poolGauge.js";
@@ -44,8 +45,12 @@ export function createApp(
   // request carrying a Conductor-signed capability token runs as that token's
   // user, and one without a header is still anonymous. Rights come from
   // `auth/CapabilityPermissionSystem.ts` either way.
-  if (config.authoring.enabled) {
-    app.use(capabilityUserMiddleware(createCapabilityVerifier(config.authoring.publicKeys)));
+  const verify = config.authoring.enabled ? createCapabilityVerifier(config.authoring.publicKeys) : undefined;
+  const readGate = createReadGate({ enforced: config.privateContent.enforced, verify });
+  if (config.privateContent.enforced) logger.info("Private content enforced");
+
+  if (verify) {
+    app.use(capabilityUserMiddleware(verify));
     logger.info({ keys: config.authoring.publicKeys.map((k) => k.kid) }, "Authoring enabled: capability tokens accepted");
   } else {
     app.use((req, _res, next) => {
@@ -91,7 +96,7 @@ export function createApp(
 
   // Declared before the H5P ajax router so `/h5p/:contentId/embed` is not
   // swallowed by the router's own `/:contentId` content-file handling.
-  app.use("/h5p", embedRouter(stack));
+  app.use("/h5p", embedRouter(stack, readGate));
 
   // The embed client contract. Served from `public/` rather than compiled so it
   // stays readable as the interface document it is.
@@ -106,8 +111,23 @@ export function createApp(
     downloadRouter(stack, {
       idleTimeoutMs: config.s3.streamIdleTimeoutMs,
       maxConcurrent: config.download.maxConcurrent,
+      readGate,
     })
   );
+
+  // Lumi's parameters route, mounted below, cannot ask about private content,
+  // so the check runs here first. A refusal is the same 404 as a missing id.
+  app.get(`/h5p${stack.config.paramsUrl}/:contentId`, async (req, res, next) => {
+    const { contentId } = req.params;
+    try {
+      if (!/^\d+$/.test(contentId)) return next();
+      if (await readGate.allows(req, contentId, await stack.contentStorage.isPrivate(contentId))) return next();
+      logger.info({ contentId }, "Parameters refused: private content");
+      res.status(404).json({ message: "Content not found", errorCode: "content-not-found" });
+    } catch (err) {
+      next(err);
+    }
+  });
 
   // Library, content and temporary files, replacing Lumi's routes for them,
   // which can leave S3 sockets held forever. See routes/files.ts.

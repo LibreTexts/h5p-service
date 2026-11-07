@@ -10,6 +10,10 @@
  * parameters needed no rights in Studio, and published textbooks depend on
  * that. Everything that writes needs a token granting that exact action, and
  * for existing content, that exact content id.
+ *
+ * Content Conductor marks private is refused before Lumi is reached, by
+ * `privateContent.ts`, not here: content files ask for View too, and they
+ * stay public.
  */
 import {
   ContentPermission,

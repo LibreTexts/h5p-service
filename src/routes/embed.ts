@@ -6,6 +6,7 @@ import { renderEmbed, renderUnavailable } from "../embed/renderer.js";
 import { displayOptionsForView } from "../embed/displayOptions.js";
 import config from "../config.js";
 import { childLogger } from "../logger.js";
+import type { ReadGate } from "../auth/privateContent.js";
 
 const log = childLogger("embed");
 
@@ -15,8 +16,12 @@ const log = childLogger("embed");
  * The path shape `/h5p/:contentId/embed` is a public contract: it is baked into
  * every activity embed across the LibreTexts libraries and cannot change. The
  * `:contentId` is the integer Studio assigned, carried through migration.
+ *
+ * Private content needs a `view` or `edit` token in `?token=` (an iframe
+ * cannot send a header) and otherwise gets the same 404 as a missing id. See
+ * `auth/privateContent.ts`.
  */
-export default function embedRouter(stack: H5PStack): Router {
+export default function embedRouter(stack: H5PStack, readGate: ReadGate): Router {
   const router = Router();
 
   router.get(
@@ -61,19 +66,30 @@ export default function embedRouter(stack: H5PStack): Router {
           return;
         }
 
+        const settings = await stack.contentStorage.getEmbedSettings(contentId);
+        if (!(await readGate.allows(req, contentId, settings.private, { allowQueryToken: true }))) {
+          log.info({ contentId, referer: req.get("referer") }, "Embed refused: private content");
+          res.status(404).type("html").send(renderUnavailable());
+          return;
+        }
+        if (settings.private) {
+          // Opened with a token in the URL: keep the page out of every cache,
+          // and keep the URL out of the Referer its file requests send.
+          res.setHeader("Cache-Control", "no-store");
+          res.setHeader("Referrer-Policy", "no-referrer");
+        }
+
         // The player's renderer is configured once at startup to return the
         // model, so formatting here stays per-request.
         // The action bar buttons the author chose in Studio. See
         // embed/displayOptions.ts for why this cannot be left to Lumi's defaults.
-        const displayOptions = displayOptionsForView(
-          await stack.contentStorage.getDisabledFeatures(contentId)
-        );
+        const displayOptions = displayOptionsForView(settings.disabledFeatures);
         const model = (await stack.player.render(
           contentId,
           anonymousUser(),
           language,
-          // Access is decided by Conductor, which owns the activity record.
-          // Studio applied no check here at all; see `anonymousUser`.
+          // Access was decided above, from the private flag Conductor sets.
+          // Public content stays open, as Studio left it; see `anonymousUser`.
           { ignoreUserPermissions: true, ...displayOptions }
         )) as IPlayerModel;
 

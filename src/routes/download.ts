@@ -17,6 +17,7 @@ import {
 } from "@lumieducation/h5p-server";
 import type { H5PStack } from "../h5p.js";
 import { childLogger } from "../logger.js";
+import type { ReadGate } from "../auth/privateContent.js";
 
 const log = childLogger("download");
 
@@ -54,10 +55,17 @@ const MAX_CONTENT_PATH_LENGTH = 255;
  * export makes no progress for `idleTimeoutMs`, and at most `maxConcurrent`
  * exports run at once. The listing calls run before any header is sent, so a
  * failure there is an ordinary H5P error response.
+ *
+ * Private content needs a `view` or `edit` token and otherwise gets the same
+ * 404 as a missing id. See `auth/privateContent.ts`.
  */
 export default function downloadRouter(
   stack: H5PStack,
-  { idleTimeoutMs, maxConcurrent }: { idleTimeoutMs: number; maxConcurrent: number }
+  {
+    idleTimeoutMs,
+    maxConcurrent,
+    readGate,
+  }: { idleTimeoutMs: number; maxConcurrent: number; readGate: ReadGate }
 ): Router {
   const router = Router();
   let active = 0;
@@ -78,7 +86,9 @@ export default function downloadRouter(
     });
     const clientGone = () => closed || res.destroyed;
 
-    sendPackage(stack, contentId, (req as any).user, res, clientGone, idleTimeoutMs).catch((err) => {
+    const readable = async () =>
+      readGate.allows(req, contentId, await stack.contentStorage.isPrivate(contentId));
+    sendPackage(stack, contentId, (req as any).user, readable, res, clientGone, idleTimeoutMs).catch((err) => {
       if (res.headersSent) res.destroy();
       else if (!clientGone()) next(err);
     });
@@ -97,6 +107,7 @@ async function sendPackage(
   stack: H5PStack,
   contentId: string,
   user: IUser,
+  readable: () => Promise<boolean>,
   res: import("express").Response,
   clientGone: () => boolean,
   idleTimeoutMs: number
@@ -105,6 +116,10 @@ async function sendPackage(
   const libraries = stack.editor.libraryManager;
 
   if (!(await storage.contentExists(contentId))) {
+    throw new H5pError("download-content-not-found", { contentId }, 404);
+  }
+  if (!(await readable())) {
+    log.info({ contentId, userAgent: res.req.get("user-agent") }, "Download refused: private content");
     throw new H5pError("download-content-not-found", { contentId }, 404);
   }
   if (!(await stack.permissionSystem.checkForContent(user, ContentPermission.Download, contentId))) {

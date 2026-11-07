@@ -54,6 +54,7 @@ Object.assign(process.env, {
   EMBED_ADAPT_REFERRERS: "https://adapt.example.test",
   EMBED_TRUSTED_PARENT_HOSTS: "trusted.example.test",
   AUTHORING_ENABLED: "true",
+  PRIVATE_CONTENT_ENFORCED: "true",
   CAPABILITY_TOKEN_PUBLIC_KEYS: JSON.stringify({ keys: [jwk] }),
   EDITOR_PARENT_ORIGINS: `${CAMPUSES},${CONDUCTOR}`,
   LOG_LEVEL: process.env.LOG_LEVEL || "silent",
@@ -266,13 +267,70 @@ check("save returns the stored display options", JSON.stringify(r.body.displayOp
 const files = await s3.send(new ListObjectsV2Command({ Bucket: `${RUN}-content`, Prefix: `${contentId}/` }));
 check("the uploaded image moved into the activity's own folder", (files.Contents ?? []).some((o) => o.Key.startsWith(`${contentId}/images/`)), (files.Contents ?? []).map((o) => o.Key).join(", "));
 
+// ---------------------------------------------------------- private content
+// A first save leaves the content private until Conductor says otherwise.
+check("a first save leaves the content private", await stack.contentStorage.isPrivate(contentId));
+const unknownEmbed = await call("GET", "/h5p/99999/embed");
+r = await call("GET", `/h5p/${contentId}/embed`);
+check("anonymous cannot embed private content", r.status === 404 && r.body === unknownEmbed.body);
+r = await call("GET", `/h5p/${contentId}/embed?token=${await token(["view"], contentId)}`);
+check("a view token in the URL opens the embed", r.status === 200 && r.body.includes("H5PIntegration"), `got ${r.status}`);
+check("an embed opened by token is never cached", r.headers.get("cache-control") === "no-store");
+check("an embed opened by token sends no referrer", r.headers.get("referrer-policy") === "no-referrer");
+r = await call("GET", `/h5p/${contentId}/embed?token=${await token(["view"], Number(contentId) + 50)}`);
+check("a view token for another id does not open the embed", r.status === 404);
+r = await call("GET", `/h5p/${contentId}/embed?token=${await token(["delete"], contentId)}`);
+check("a delete token does not open the embed", r.status === 404);
+r = await call("GET", `/h5p/params/${contentId}`);
+check("anonymous cannot read private parameters", r.status === 404, `got ${r.status}`);
+r = await call("GET", `/h5p/params/${contentId}`, { headers: await auth(["view"], contentId) });
+check("a view token reads private parameters", r.status === 200 && r.body?.params?.params?.text !== undefined, `got ${r.status}`);
+r = await call("GET", `/h5p/params/${contentId}?token=${await token(["view"], contentId)}`);
+check("parameters ignore a token in the URL", r.status === 404, `got ${r.status}`);
+r = await call("GET", `/h5p/download/${contentId}`);
+check("anonymous cannot download private content", r.status === 404, `got ${r.status}`);
+r = await call("GET", `/h5p/download/${contentId}`, { headers: await auth(["view"], contentId) });
+check("a view token downloads private content", r.status === 200, `got ${r.status}`);
+const imageKey = (files.Contents ?? []).find((o) => o.Key.startsWith(`${contentId}/images/`))?.Key;
+r = await call("GET", `/h5p/content/${imageKey}`);
+check("content files stay public by design", r.status === 200, `got ${r.status}`);
+
+r = await call("PUT", `/h5p/service/content/${contentId}/visibility`, { json: { private: false } });
+check("setting visibility without a token is a 401", r.status === 401);
+r = await call("PUT", `/h5p/service/content/${contentId}/visibility`, { json: { private: false }, headers: await auth(["edit"], contentId) });
+check("setting visibility with an edit token is a 403", r.status === 403);
+r = await call("PUT", `/h5p/service/content/${contentId}/visibility`, { json: { private: false }, headers: await service(["visibility"], Number(contentId) + 50) });
+check("setting visibility with a token for another id is a 403", r.status === 403);
+r = await call("PUT", `/h5p/service/content/${contentId}/visibility`, { json: { private: "no" }, headers: await service(["visibility"], contentId) });
+check("a non-boolean visibility is a 400", r.status === 400);
+r = await call("PUT", "/h5p/service/content/99999/visibility", { json: { private: true }, headers: await service(["visibility"], 99999) });
+check("setting visibility on unknown content is a 404", r.status === 404);
+r = await call("PUT", `/h5p/service/content/${contentId}/visibility`, { json: { private: false }, headers: await service(["visibility"], contentId) });
+check("a visibility token makes the content public", r.status === 204 && !(await stack.contentStorage.isPrivate(contentId)));
+
 r = await call("GET", `/h5p/${contentId}/embed`);
 const embedOptions = integrationOf(r.body).contents[`cid-${contentId}`].displayOptions;
 check("the embed shows the saved activity", r.status === 200);
+check("a public embed sets no cache or referrer headers", r.headers.get("cache-control") === null && r.headers.get("referrer-policy") === null);
 check("the embed applies the author's display options", embedOptions.export === false && embedOptions.embed === true && embedOptions.copyright === true, JSON.stringify(embedOptions));
 
 r = await call("POST", `/h5p/${contentId}/save`, { json: saveBody("edited"), headers: await auth(["edit"], contentId) });
 check("a later save without display options keeps them", r.status === 200 && r.body.displayOptions.download === false);
+check("a later save keeps the content public", !(await stack.contentStorage.isPrivate(contentId)));
+
+// ---------------------------------------------------------- reconcile
+r = await call("PUT", "/h5p/service/private-content", { json: { contentIds: [contentId] }, headers: await service(["visibility"], contentId) });
+check("a reconcile with a token for one id is a 403", r.status === 403);
+r = await call("PUT", "/h5p/service/private-content", { json: { contentIds: ["12 "] }, headers: await service(["visibility"]) });
+check("a reconcile with a malformed id is a 400", r.status === 400);
+r = await call("PUT", "/h5p/service/private-content", { json: { contentIds: [Number(contentId), 99999] }, headers: await service(["visibility"]) });
+check(
+  "a reconcile marks listed content and reports unknown ids",
+  r.status === 200 && r.body.marked === 1 && JSON.stringify(r.body.unknown) === '["99999"]' && (await stack.contentStorage.isPrivate(contentId)),
+  JSON.stringify(r.body)
+);
+r = await call("PUT", "/h5p/service/private-content", { json: { contentIds: [] }, headers: await service(["visibility"]) });
+check("a reconcile clears content no longer listed", r.status === 200 && r.body.cleared === 1 && !(await stack.contentStorage.isPrivate(contentId)), JSON.stringify(r.body));
 r = await call("GET", `/h5p/${contentId}/edit`);
 check("the editor page for saved content is served", r.status === 200);
 check("the editor page carries the stored display options", r.body.includes('"displayOptions":{"frame":true,"download":false,"embed":true,"copyright":true}'));

@@ -27,6 +27,7 @@ const { requiredEd25519PublicKeySet } = await import("../dist/config/env.js");
 const { createCapabilityVerifier, CapabilityTokenError } = await import("../dist/auth/capabilityToken.js");
 const { default: CapabilityPermissionSystem } = await import("../dist/auth/CapabilityPermissionSystem.js");
 const { capabilityUserMiddleware } = await import("../dist/auth/requestUser.js");
+const { createReadGate } = await import("../dist/auth/privateContent.js");
 const { ContentPermission, GeneralPermission, TemporaryFilePermission } = await import("@lumieducation/h5p-server");
 
 let failures = 0;
@@ -92,6 +93,9 @@ check("the token id is kept for audit", typeof accepted.tokenId === "string" && 
 check("a numeric cid normalises to Lumi's string id", (await verify(await sign({ cid: 31483 }))).contentId === "31483");
 check("a token from the next key verifies during rotation", (await reason(sign({}, { pair: next, kid: nextJwk.kid }))) === "accepted");
 check("a create token needs no cid", (await reason(sign({ act: ["create"], cid: undefined }, { omit: ["cid"] }))) === "accepted");
+check("a view token with a cid verifies", (await reason(sign({ act: ["view"] }))) === "accepted");
+check("a visibility token verifies with a cid", (await reason(sign({ act: ["visibility"] }))) === "accepted");
+check("a visibility token verifies without a cid (reconcile)", (await reason(sign({ act: ["visibility"] }, { omit: ["cid"] }))) === "accepted");
 
 const cases = [
   ["expired token", sign({}, { iat: now - 1000, exp: now - 100 }), "expired"],
@@ -107,6 +111,7 @@ const cases = [
   ["empty action list", sign({ act: [] }), "bad-claims"],
   ["edit without a cid", sign({}, { omit: ["cid"] }), "bad-claims"],
   ["delete without a cid", sign({ act: ["delete"] }, { omit: ["cid"] }), "bad-claims"],
+  ["view without a cid", sign({ act: ["view"] }, { omit: ["cid"] }), "bad-claims"],
   ["cid with trailing space", sign({ cid: "12 " }), "bad-claims"],
   ["cid in exponent form", sign({ cid: "1e3" }), "bad-claims"],
   ["cid of zero", sign({ cid: "0" }), "bad-claims"],
@@ -150,6 +155,33 @@ check("a create token can upload temporary files", await ps.checkForTemporaryFil
 check("a libraries token installs libraries", await ps.checkForGeneralAction(librarian, GeneralPermission.InstallRecommended));
 check("a libraries token cannot edit content", !(await ps.checkForContent(librarian, ContentPermission.Edit, "12")));
 check("nobody lists content", !(await ps.checkForContent(editor12, ContentPermission.List, undefined)));
+
+// ------------------------------------------------------------ private content
+const enforcedGate = createReadGate({ enforced: true, verify });
+const openGate = createReadGate({ enforced: false, verify });
+const reqWith = (user, query = {}) => ({ user, query });
+const viewer12 = await asUser({ act: ["view"], cid: "12" });
+const viewToken12 = await sign({ act: ["view"], cid: "12" });
+
+check("public content stays open to anonymous", await enforcedGate.allows(reqWith(anon), "12", false));
+check("private content is open while not enforced", await openGate.allows(reqWith(anon), "12", true));
+check("anonymous cannot read private content", !(await enforcedGate.allows(reqWith(anon), "12", true)));
+check("a view token reads its own private content", await enforcedGate.allows(reqWith(viewer12), "12", true));
+check("an edit token reads its own private content", await enforcedGate.allows(reqWith(editor12), "12", true));
+check("a view token cannot read another private id", !(await enforcedGate.allows(reqWith(viewer12), "13", true)));
+check("a delete token cannot read private content", !(await enforcedGate.allows(reqWith(deleter12), "12", true)));
+check("a query token opens the embed", await enforcedGate.allows(reqWith(anon, { token: viewToken12 }), "12", true, { allowQueryToken: true }));
+check("a query token is ignored where not allowed", !(await enforcedGate.allows(reqWith(anon, { token: viewToken12 }), "12", true)));
+check("a query token for another id is refused", !(await enforcedGate.allows(reqWith(anon, { token: viewToken12 }), "13", true, { allowQueryToken: true })));
+check(
+  "an expired query token is refused",
+  !(await enforcedGate.allows(reqWith(anon, { token: await sign({ act: ["view"], cid: "12" }, { iat: now - 1000, exp: now - 100 }) }), "12", true, { allowQueryToken: true }))
+);
+check("a garbage query token is refused", !(await enforcedGate.allows(reqWith(anon, { token: "not.a.token" }), "12", true, { allowQueryToken: true })));
+check(
+  "enforced without a verifier refuses query tokens",
+  !(await createReadGate({ enforced: true }).allows(reqWith(anon, { token: viewToken12 }), "12", true, { allowQueryToken: true }))
+);
 
 // ------------------------------------------------------------ middleware
 const app = express();

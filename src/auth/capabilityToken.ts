@@ -36,12 +36,24 @@ const CLOCK_TOLERANCE_SECONDS = 30;
  * - `libraries`: install and update H5P libraries. Admin tokens only, never
  *   an author's (design decision 4), because a library is arbitrary script on
  *   the embed origin ADAPT trusts.
+ * - `view`: read private content under the token's `cid` (embed, parameters,
+ *   download). Public content needs no token.
+ * - `visibility`: mark content private or public. Server to server only.
+ *   With a `cid`, that content alone; without, the full private set.
  */
-export const CAPABILITY_ACTIONS = ["edit", "create", "delete", "allocate", "libraries"] as const;
+export const CAPABILITY_ACTIONS = [
+  "edit",
+  "create",
+  "delete",
+  "allocate",
+  "libraries",
+  "view",
+  "visibility",
+] as const;
 export type CapabilityAction = (typeof CAPABILITY_ACTIONS)[number];
 
 /** Actions that only make sense for one particular content id. */
-const ACTIONS_NEEDING_CID: readonly CapabilityAction[] = ["edit", "delete"];
+const ACTIONS_NEEDING_CID: readonly CapabilityAction[] = ["edit", "delete", "view"];
 
 export type Capability = {
   /** Conductor user uuid, or `conductor-service` for server-to-server calls. */

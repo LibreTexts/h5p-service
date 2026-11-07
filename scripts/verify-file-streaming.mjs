@@ -24,6 +24,7 @@ const { default: StreamingLibraryStorage } = await import("../dist/storage/Strea
 const { default: IntegerIdContentStorage } = await import("../dist/storage/IntegerIdContentStorage.js");
 const { default: TemporaryFileStorage } = await import("../dist/storage/TemporaryFileStorage.js");
 const { default: downloadRouter } = await import("../dist/routes/download.js");
+const { createReadGate } = await import("../dist/auth/privateContent.js");
 const { S3Pool } = await import("../dist/observability/s3Pool.js");
 const { PoolMonitor } = await import("../dist/observability/poolGauge.js");
 const { InFlightRequests } = await import("../dist/observability/requestLog.js");
@@ -304,6 +305,7 @@ const inUse = (pool) => pool.stats().origins.shared?.inUse ?? 0;
 
 const LIBRARY_FILES = 120; // more than twice the pool, like an Interactive Book
 const CONTENT_FILES = ["images/a.png", "images/b.png"];
+const PRIVATE_ID = "31484";
 
 function downloadStack(s3) {
   const open = async (Key) => (await s3.getObject({ Bucket: "verify", Key })).Body;
@@ -313,7 +315,8 @@ function downloadStack(s3) {
     config: { downloadUrl: "/download" },
     permissionSystem: { checkForContent: async () => true },
     contentStorage: {
-      contentExists: async (id) => id === "31483",
+      contentExists: async (id) => id === "31483" || id === PRIVATE_ID,
+      isPrivate: async (id) => id === PRIVATE_ID,
       getParameters: async () => ({ text: "verify" }),
       getMetadata: async () => metadata,
       listFiles: async () => CONTENT_FILES,
@@ -332,11 +335,14 @@ function downloadStack(s3) {
 
 async function startDownloadApp(stack, { maxConcurrent = 100, idleTimeoutMs = IDLE_TIMEOUT_MS } = {}) {
   const app = express();
+  // `x-verify-view: {id}` stands in for a verified `view` token for that id.
   app.use((req, _res, next) => {
-    req.user = { id: "verify" };
+    const cid = req.get("x-verify-view");
+    req.user = { id: "verify", ...(cid ? { capability: { contentId: cid, actions: new Set(["view"]) } } : {}) };
     next();
   });
-  app.use("/h5p", downloadRouter(stack, { idleTimeoutMs, maxConcurrent }));
+  const readGate = createReadGate({ enforced: true });
+  app.use("/h5p", downloadRouter(stack, { idleTimeoutMs, maxConcurrent, readGate }));
   const server = app.listen(0, "127.0.0.1");
   await new Promise((resolve) => server.once("listening", resolve));
   servers.push(server);
@@ -370,6 +376,17 @@ function stallDownload(port) {
 
   const missing = await get(port, "/h5p/download/999");
   check("a download of unknown content is a 404", missing.status === 404, String(missing.status));
+
+  const refused = await get(port, `/h5p/download/${PRIVATE_ID}`);
+  check(
+    "a download of private content without a token is the same 404",
+    refused.status === 404 && refused.body.toString() === missing.body.toString().replace("999", PRIVATE_ID),
+    `${refused.status} ${refused.body.toString().slice(0, 120)}`
+  );
+  const opened = await get(port, `/h5p/download/${PRIVATE_ID}`, { headers: { "x-verify-view": PRIVATE_ID }, timeoutMs: 20000 });
+  check("a download of private content with a view token is a 200", opened.status === 200, String(opened.status));
+  const wrongId = await get(port, `/h5p/download/${PRIVATE_ID}`, { headers: { "x-verify-view": "31483" } });
+  check("a view token for another id does not open a private download", wrongId.status === 404, String(wrongId.status));
 
   // Clients that leave partway, as a crawler that gives up does.
   await Promise.all(

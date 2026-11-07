@@ -57,7 +57,16 @@ export type ContentDocument = {
    * `embed/displayOptions.ts`.
    */
   disabledFeatures?: number;
+  /**
+   * Set by Conductor when the activity's visibility is private. The embed,
+   * parameters and download then need a capability token. Absent means
+   * public, which is every migrated activity. See `auth/privateContent.ts`.
+   */
+  private?: boolean;
 };
+
+/** What the embed route reads before rendering, in one query. */
+export type EmbedSettings = { disabledFeatures?: number; private: boolean };
 
 export type CounterDocument = { _id: string; seq: number };
 
@@ -413,11 +422,73 @@ export default class IntegerIdContentStorage implements IContentStorage {
    * stored (or the content does not exist; the player reports that itself).
    */
   async getDisabledFeatures(contentId: ContentId): Promise<number | undefined> {
+    return (await this.getEmbedSettings(contentId)).disabledFeatures;
+  }
+
+  /**
+   * The display options bitmask and the private flag, read together so the
+   * embed route checks access without an extra query.
+   */
+  async getEmbedSettings(contentId: ContentId): Promise<EmbedSettings> {
     const doc = await this.mongodb.findOne(
       { _id: String(contentId) },
-      { projection: { _id: false, disabledFeatures: true } }
+      { projection: { _id: false, disabledFeatures: true, private: true } }
     );
-    return typeof doc?.disabledFeatures === "number" ? doc.disabledFeatures : undefined;
+    return {
+      disabledFeatures: typeof doc?.disabledFeatures === "number" ? doc.disabledFeatures : undefined,
+      private: doc?.private === true,
+    };
+  }
+
+  /** Whether Conductor has marked the content private. False when absent. */
+  async isPrivate(contentId: ContentId): Promise<boolean> {
+    return (await this.getEmbedSettings(contentId)).private;
+  }
+
+  /**
+   * Marks existing content private or public. Never creates a document, for
+   * the same reason as `setDisabledFeatures`.
+   */
+  async setPrivate(contentId: ContentId, value: boolean): Promise<void> {
+    const result = await this.mongodb.updateOne(
+      { _id: String(contentId) },
+      value ? { $set: { private: true } } : { $unset: { private: "" } }
+    );
+    if (result.matchedCount !== 1) {
+      throw new H5pError("mongo-s3-content-storage:content-not-found", {}, 404);
+    }
+  }
+
+  /**
+   * Makes `contentIds` the complete set of private content: marks each of
+   * them and clears every other. Conductor's reconcile job sends its full
+   * list, so a missed push is repaired on the next run.
+   *
+   * @returns how many documents changed each way, and the ids that have no
+   * content (an activity whose first save never happened, or a stale id).
+   */
+  async replacePrivateSet(
+    contentIds: string[]
+  ): Promise<{ marked: number; cleared: number; unknown: string[] }> {
+    const ids = [...new Set(contentIds)];
+    const marked = await this.mongodb.updateMany(
+      { _id: { $in: ids }, private: { $ne: true } },
+      { $set: { private: true } }
+    );
+    const cleared = await this.mongodb.updateMany(
+      { _id: { $nin: ids }, private: true },
+      { $unset: { private: "" } }
+    );
+    const found = new Set(
+      (await this.mongodb.find({ _id: { $in: ids } }, { projection: { _id: true } }).toArray()).map(
+        (doc) => doc._id
+      )
+    );
+    return {
+      marked: marked.modifiedCount,
+      cleared: cleared.modifiedCount,
+      unknown: ids.filter((id) => !found.has(id)),
+    };
   }
 
   /**

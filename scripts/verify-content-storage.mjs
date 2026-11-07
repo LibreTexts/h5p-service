@@ -126,6 +126,23 @@ try {
 check("display options are never stored for missing content", orphanRejected);
 check("no orphan document was created", (await storage.contentExists("999998")) === false);
 
+// The private flag Conductor sets lives beside Lumi's fields the same way.
+check("migrated content is public by default", (await storage.isPrivate(STUDIO_ID)) === false);
+await storage.setPrivate(STUDIO_ID, true);
+const settings = await storage.getEmbedSettings(STUDIO_ID);
+check("the embed reads the flag and display options together", settings.private === true && settings.disabledFeatures === 6);
+await storage.addContent({ ...metadata, title: "Edited once more" }, params, user, STUDIO_ID);
+check("a content save keeps the private flag", await storage.isPrivate(STUDIO_ID));
+await storage.setPrivate(STUDIO_ID, false);
+check("the flag clears", (await storage.isPrivate(STUDIO_ID)) === false);
+let orphanPrivate = false;
+try {
+  await storage.setPrivate("999998", true);
+} catch {
+  orphanPrivate = true;
+}
+check("the flag is never stored for missing content", orphanPrivate && (await storage.contentExists("999998")) === false);
+
 // 4. New content must not collide with migrated ids.
 await storage.seedCounter(31483);
 const newId = await storage.addContent(metadata, params, user);

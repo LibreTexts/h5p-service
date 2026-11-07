@@ -119,6 +119,7 @@ so a default would be inherited silently by a fork.
 | `AUTHORING_ENABLED` | `false` | `true` accepts Conductor-signed capability tokens for H5P authoring. Off, every request is anonymous and an Authorization header is ignored. Keep it off in production until Studio authoring is frozen and the id counter re-seeded. |
 | `EDITOR_PARENT_ORIGINS` | unset | Required when `AUTHORING_ENABLED=true`. Conductor's origins, comma-separated: the only pages that may frame the editor (`frame-ancestors`) and exchange messages with it. An entry may be a `https://*.host` pattern for campus instances. Narrower than `EMBED_FRAME_ANCESTORS` on purpose. |
 | `CAPABILITY_TOKEN_PUBLIC_KEYS` | unset | Required when `AUTHORING_ENABLED=true`. Conductor's Ed25519 public keys as a JWK set, each with a `kid`: `{"keys":[{"kty":"OKP","crv":"Ed25519","x":"...","kid":"..."}]}`. Not secret. A key carrying `d` (a private key) is refused at startup. List two keys while rotating. |
+| `PRIVATE_CONTENT_ENFORCED` | same as `AUTHORING_ENABLED` | `true` refuses the embed, parameters and `.h5p` download of content Conductor has marked private, unless the request carries a `view` or `edit` token for that id (the embed takes it as `?token=`). A refusal is the same 404 as a missing id. Content files stay public. Needs `AUTHORING_ENABLED=true`, and setting it `true` without authoring stops startup. `false` still stores private flags, so they can be populated and checked before anything is refused. |
 
 `STUDIO_MYSQL_*` are read only by the migration, lazily, so the service never
 demands them. See `.env.example`.
@@ -223,6 +224,8 @@ on, the service adds:
 | `POST /h5p/{id}/save` | `edit` token for `{id}` | Saves the editor's content and the author's display options. |
 | `POST /h5p/service/allocate` | `allocate` token | Takes the next content id for a new activity. Server to server. |
 | `DELETE /h5p/service/content/{id}` | `delete` token for `{id}` | Deletes content and its files. Server to server. |
+| `PUT /h5p/service/content/{id}/visibility` | `visibility` token for `{id}` | Body `{"private": true\|false}`. Marks content private or public. Server to server. |
+| `PUT /h5p/service/private-content` | `visibility` token with no `cid` | Body `{"contentIds": [...]}`. Makes that list the complete private set, and returns `{marked, cleared, unknown}`. Conductor's reconcile job. |
 | `/h5p/ajax`, `/h5p/editor/*`, `/h5p/temp-files/*` | a token for `/h5p/ajax` | H5P's own editor routes, from Lumi. |
 
 Tokens are Ed25519 JWTs signed by Conductor. This service verifies them and never issues them. The design is in `H5P_AUTHORING_DESIGN.md` in the migration workspace.

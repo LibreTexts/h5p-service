@@ -43,6 +43,16 @@ const nodeEnv = optionalEnum("NODE_ENV", NODE_ENVS, "development");
 
 const authoringEnabled = optionalEnum("AUTHORING_ENABLED", ["true", "false"] as const, "false") === "true";
 
+// Reading private content needs a capability token, and only authoring loads
+// the verifier. Enforcing without it would lock owners out of their own
+// activities with no way back in. So enforcement is on by default wherever
+// authoring is, and asking for it without authoring is a startup error.
+const privateContentEnforced =
+  optionalEnum("PRIVATE_CONTENT_ENFORCED", ["true", "false"] as const, authoringEnabled ? "true" : "false") === "true";
+if (privateContentEnforced && !authoringEnabled) {
+  throw new Error("PRIVATE_CONTENT_ENFORCED=true needs AUTHORING_ENABLED=true");
+}
+
 // Static S3 credentials are optional, and deliberately absent from the config
 // object below: the AWS SDK client in `src/h5p.ts` is given no `credentials`
 // property, so its default provider chain resolves a task role, an instance
@@ -165,6 +175,19 @@ const config = {
      * patterns, which editor-page.js resolves before posting to one.
      */
     parentOrigins: authoringEnabled ? requiredOriginPatternList("EDITOR_PARENT_ORIGINS") : [],
+  },
+
+  /**
+   * Private activities. See `auth/privateContent.ts`.
+   *
+   * On by default with authoring. On, the embed, parameters and download of
+   * private content need a `view` or `edit` token for that content id.
+   * Content files stay public either way. Conductor marks content private
+   * whatever this says, so `false` lets the flags be populated and checked
+   * before anything is refused.
+   */
+  privateContent: {
+    enforced: privateContentEnforced,
   },
 
   embed: {
