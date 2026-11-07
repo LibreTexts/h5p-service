@@ -99,6 +99,8 @@ so a default would be inherited silently by a fork.
 | `NODE_ENV` | `development` | One of `development`, `test`, `production`. |
 | `LOG_LEVEL` | `info` in production, else `debug` | A pino level. |
 | `S3_STREAM_IDLE_TIMEOUT_MS` | `30000` | How long a file download may make no progress before it is closed, which frees its S3 socket. |
+| `S3_POOL_REPORT_INTERVAL_MS` | `60000` | How often the `s3-pool` log line reports sockets in use and queued per S3 client and bucket, with requests in flight. A warning whenever a request queued. |
+| `SLOW_REQUEST_LOG_MS` | `10000` | Requests at least this long are logged as warnings. Downloads and uploads are logged always, and any request whose client left early. |
 | `MONGODB_DB` | `h5p` | Database name. |
 | `MONGODB_CONTENT_COLLECTION` | `h5p_content` | Content records. |
 | `MONGODB_LIBRARY_COLLECTION` | `h5p_libraries` | Library records. |

@@ -3,6 +3,7 @@ import { initMongo, S3TemporaryFileStorage } from "@lumieducation/h5p-mongos3";
 import { S3 } from "@aws-sdk/client-s3";
 import IntegerIdContentStorage from "./storage/IntegerIdContentStorage.js";
 import StreamingLibraryStorage from "./storage/StreamingLibraryStorage.js";
+import { S3Pool } from "./observability/s3Pool.js";
 import CapabilityPermissionSystem from "./auth/CapabilityPermissionSystem.js";
 import config from "./config.js";
 import { childLogger } from "./logger.js";
@@ -18,6 +19,8 @@ export interface H5PStack {
    * methods Lumi does not know about, such as the display-option bitmask.
    */
   contentStorage: IntegerIdContentStorage;
+  /** The socket pools behind the two S3 clients, for the pool gauge and /health. */
+  pools: S3Pool[];
 }
 
 /**
@@ -48,7 +51,20 @@ export async function buildH5P(): Promise<H5PStack> {
       ? { endpoint: config.s3.endpoint, forcePathStyle: true }
       : {}),
   };
-  const s3 = new S3(s3Options);
+  // Our own agents, the same size the SDK would build, so the pools can be
+  // read. See observability/s3Pool.ts.
+  // A bucket configured for more than one role is one origin, and is named
+  // for all of them, e.g. "content+temporary".
+  const buckets: Record<string, string> = {};
+  for (const [bucket, role] of [
+    [config.s3.contentBucket, "content"],
+    [config.s3.libraryBucket, "library"],
+    [config.s3.temporaryBucket, "temporary"],
+  ]) {
+    buckets[bucket] = buckets[bucket] ? `${buckets[bucket]}+${role}` : role;
+  }
+  const mainPool = new S3Pool("main", buckets);
+  const s3 = new S3({ ...s3Options, requestHandler: mainPool.requestHandler() });
 
   /**
    * File downloads get their own client, and so their own socket pool. Each
@@ -56,7 +72,8 @@ export async function buildH5P(): Promise<H5PStack> {
    * finishes in milliseconds and is what embeds and the editor wait on.
    * See `routes/files.ts`.
    */
-  const streamS3 = new S3(s3Options);
+  const streamPool = new S3Pool("stream", buckets);
+  const streamS3 = new S3({ ...s3Options, requestHandler: streamPool.requestHandler() });
 
   const db = await initMongo(config.mongo.url, config.mongo.db);
 
@@ -148,7 +165,7 @@ export async function buildH5P(): Promise<H5PStack> {
     "H5P stack initialized"
   );
 
-  return { editor, player, config: h5pConfig, contentStorage };
+  return { editor, player, config: h5pConfig, contentStorage, pools: [mainPool, streamPool] };
 }
 
 /**

@@ -12,6 +12,7 @@ import legacyRouter from "./routes/legacy.js";
 import { createCapabilityVerifier } from "./auth/capabilityToken.js";
 import { capabilityUserMiddleware } from "./auth/requestUser.js";
 import authoringRouter from "./routes/authoring.js";
+import { InFlightRequests, requestLog } from "./observability/requestLog.js";
 
 const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -23,8 +24,12 @@ const projectRoot = path.resolve(
  * verification scripts can run the real middleware and routes against a test
  * stack.
  */
-export function createApp(stack: H5PStack): express.Express {
+export function createApp(stack: H5PStack, inFlight = new InFlightRequests()): express.Express {
   const app = express();
+
+  // First, so every request is counted while in flight, including ones the
+  // auth middleware below rejects. See observability/requestLog.ts.
+  app.use(requestLog(inFlight, { slowMs: config.observability.slowRequestMs }));
 
   // The H5P ajax router reads `req.user`. With authoring off (phase 1) every
   // request is anonymous and an Authorization header is ignored. With it on, a
@@ -61,8 +66,16 @@ export function createApp(stack: H5PStack): express.Express {
   app.use(express.urlencoded({ extended: true }));
   app.use(fileUpload({ limits: { fileSize: 100 * 1024 * 1024 } }));
 
+  // Pool counts are reported here as well as logged, so they can be read
+  // during an incident. They do not affect the status yet: the container
+  // healthcheck reads only that.
   app.get("/health", (_req, res) => {
-    res.json({ healthy: true, service: "h5p-service" });
+    res.json({
+      healthy: true,
+      service: "h5p-service",
+      s3Pools: Object.fromEntries(stack.pools.map((pool) => [pool.name, pool.stats()])),
+      inFlight: inFlight.summary(),
+    });
   });
 
   // Declared before the H5P ajax router so `/h5p/:contentId/embed` is not

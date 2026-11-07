@@ -47,6 +47,20 @@ export default function embedRouter(stack: H5PStack): Router {
         typeof req.query.lang === "string" ? req.query.lang : "en";
 
       try {
+        // Lumi's player turns every failure to read parameters or metadata,
+        // Mongo errors included, into `h5p-player:content-missing`. Checking
+        // first separates an id with no content, which is routine for deleted
+        // activities and probes, from a store fault, which reaches the catch
+        // below with its real cause.
+        if (!(await stack.contentStorage.contentExists(contentId))) {
+          log.info(
+            { contentId, referer: req.get("referer"), userAgent: req.get("user-agent") },
+            "Embed requested for unknown content"
+          );
+          res.status(404).type("html").send(renderUnavailable());
+          return;
+        }
+
         // The player's renderer is configured once at startup to return the
         // model, so formatting here stays per-request.
         // The action bar buttons the author chose in Studio. See
@@ -68,9 +82,9 @@ export default function embedRouter(stack: H5PStack): Router {
           .type("html")
           .send(renderEmbed(model, language, { embedCode: displayOptions.showEmbedButton }));
       } catch (err) {
-        // A missing or unreadable content id is an expected outcome for an
-        // embed whose activity was deleted, not a server fault.
-        log.warn({ err, contentId }, "Embed render failed");
+        // The content exists, so this is a store or library fault the reader
+        // sees as a broken embed.
+        log.error({ err, contentId }, "Embed render failed");
         res.status(404).type("html").send(renderUnavailable());
       }
     }

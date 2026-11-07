@@ -101,6 +101,14 @@ const config = {
     streamIdleTimeoutMs: optionalInt("S3_STREAM_IDLE_TIMEOUT_MS", 30_000, 1_000, 600_000),
   },
 
+  /** What the service reports about itself. See `src/observability/`. */
+  observability: {
+    /** How often the S3 pool gauge logs socket counts and requests in flight. */
+    poolReportMs: optionalInt("S3_POOL_REPORT_INTERVAL_MS", 60_000, 5_000, 3_600_000),
+    /** Requests that take at least this long are logged as warnings. */
+    slowRequestMs: optionalInt("SLOW_REQUEST_LOG_MS", 10_000, 100, 600_000),
+  },
+
   /**
    * On-disk locations of the H5P client libraries, populated by
    * `npm run fetch:h5p-core`. These are the MIT-licensed browser runtime from
