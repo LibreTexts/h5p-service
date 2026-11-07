@@ -101,6 +101,9 @@ so a default would be inherited silently by a fork.
 | `S3_STREAM_IDLE_TIMEOUT_MS` | `30000` | How long a file download may make no progress before it is closed, which frees its S3 socket. |
 | `S3_POOL_REPORT_INTERVAL_MS` | `60000` | How often the `s3-pool` log line reports sockets in use and queued per S3 client and bucket, with requests in flight. A warning whenever a request queued. |
 | `SLOW_REQUEST_LOG_MS` | `10000` | Requests at least this long are logged as warnings. Downloads and uploads are logged always, and any request whose client left early. |
+| `S3_REQUEST_TIMEOUT_MS` | `30000` | How long an S3 request may wait for its response headers, time queued for a socket included, before it fails. Response bodies are not covered. |
+| `S3_POOL_UNHEALTHY_AFTER_MS` | `120000` | How long any S3 pool may stay full with requests queued before `/health` returns 503, so the task is replaced. |
+| `DOWNLOAD_MAX_CONCURRENT` | `4` | `.h5p` downloads running at once. Further requests get a 503 with `Retry-After: 60`. |
 | `MONGODB_DB` | `h5p` | Database name. |
 | `MONGODB_CONTENT_COLLECTION` | `h5p_content` | Content records. |
 | `MONGODB_LIBRARY_COLLECTION` | `h5p_libraries` | Library records. |
@@ -171,7 +174,7 @@ should become `:latest`. It is gated by the same authorized-users secret.
 | `npm run fetch:h5p-core` | Re-fetch and verify the H5P client libraries |
 | `npm run verify:embed-contract` | Assert the public contracts above still hold |
 | `npm run verify:capability-token` | Assert token verification and the permission system Lumi is given |
-| `npm run verify:file-streaming` | Assert the file routes keep their responses and never leave the S3 socket pool pinned |
+| `npm run verify:file-streaming` | Assert the file and download routes keep their responses and never leave an S3 socket pool pinned, and that S3 requests time out |
 | `npm run verify:content-storage` | Exercise content storage against a real MongoDB and MinIO |
 | `npm run verify:authoring` | Exercise the authoring routes against a real MongoDB and MinIO, with authoring on |
 | `npm run migrate:studio-content` | One-time import of Studio libraries and content |

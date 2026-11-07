@@ -9,6 +9,9 @@ import { childLogger } from "../logger.js";
 const KEEP_ALIVE = true;
 const MAX_SOCKETS = 50;
 
+/** How long opening a connection to S3 may take. */
+const CONNECTION_TIMEOUT_MS = 5_000;
+
 export interface OriginStats {
   /** Sockets carrying a request or holding an unread response body. */
   inUse: number;
@@ -49,14 +52,28 @@ export class S3Pool {
    */
   constructor(
     readonly name: string,
-    private buckets: Record<string, string> = {}
+    private buckets: Record<string, string> = {},
+    private requestTimeoutMs?: number
   ) {}
 
-  /** For the `requestHandler` option of an S3 client. */
+  /**
+   * For the `requestHandler` option of an S3 client.
+   *
+   * The request timeout runs from the moment a request is made until its
+   * response headers arrive, time spent queued for a socket included, and
+   * `throwOnRequestTimeout` makes it fail the request rather than only warn.
+   * Without it a request queued behind a full pool waited forever, and the
+   * queue reached 5,509 in production. A response body is not covered: once
+   * headers arrive the caller owns the stream, and the routes that stream
+   * bodies run their own idle timers.
+   */
   requestHandler() {
     return {
       httpAgent: this.httpAgent,
       httpsAgent: this.httpsAgent,
+      connectionTimeout: CONNECTION_TIMEOUT_MS,
+      requestTimeout: this.requestTimeoutMs,
+      throwOnRequestTimeout: this.requestTimeoutMs !== undefined,
       logger: childLogger("s3").child({ pool: this.name }),
     };
   }

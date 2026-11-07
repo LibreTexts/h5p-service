@@ -99,6 +99,17 @@ const config = {
      * `routes/files.ts`.
      */
     streamIdleTimeoutMs: optionalInt("S3_STREAM_IDLE_TIMEOUT_MS", 30_000, 1_000, 600_000),
+    /**
+     * How long an S3 request may wait for its response headers, queueing for
+     * a socket included, before it fails. See `observability/s3Pool.ts`.
+     */
+    requestTimeoutMs: optionalInt("S3_REQUEST_TIMEOUT_MS", 30_000, 1_000, 600_000),
+  },
+
+  /** The .h5p download. See `routes/download.ts`. */
+  download: {
+    /** Exports running at once. Each holds at most one S3 socket. */
+    maxConcurrent: optionalInt("DOWNLOAD_MAX_CONCURRENT", 4, 1, 50),
   },
 
   /** What the service reports about itself. See `src/observability/`. */
@@ -107,6 +118,11 @@ const config = {
     poolReportMs: optionalInt("S3_POOL_REPORT_INTERVAL_MS", 60_000, 5_000, 3_600_000),
     /** Requests that take at least this long are logged as warnings. */
     slowRequestMs: optionalInt("SLOW_REQUEST_LOG_MS", 10_000, 100, 600_000),
+    /**
+     * How long any S3 bucket's pool may stay full with requests queued before
+     * /health reports the service unhealthy, so the task is replaced.
+     */
+    poolUnhealthyAfterMs: optionalInt("S3_POOL_UNHEALTHY_AFTER_MS", 120_000, 10_000, 3_600_000),
   },
 
   /**

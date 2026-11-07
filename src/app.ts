@@ -13,6 +13,8 @@ import { createCapabilityVerifier } from "./auth/capabilityToken.js";
 import { capabilityUserMiddleware } from "./auth/requestUser.js";
 import authoringRouter from "./routes/authoring.js";
 import { InFlightRequests, requestLog } from "./observability/requestLog.js";
+import type { PoolMonitor } from "./observability/poolGauge.js";
+import downloadRouter from "./routes/download.js";
 
 const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -23,8 +25,14 @@ const projectRoot = path.resolve(
  * The HTTP application, without listening. Split from index.ts so the
  * verification scripts can run the real middleware and routes against a test
  * stack.
+ *
+ * `monitor` is optional for the same reason, so the scripts start no timers.
+ * Without it /health never fails.
  */
-export function createApp(stack: H5PStack, inFlight = new InFlightRequests()): express.Express {
+export function createApp(
+  stack: H5PStack,
+  { inFlight = new InFlightRequests(), monitor }: { inFlight?: InFlightRequests; monitor?: PoolMonitor } = {}
+): express.Express {
   const app = express();
 
   // First, so every request is counted while in flight, including ones the
@@ -66,13 +74,16 @@ export function createApp(stack: H5PStack, inFlight = new InFlightRequests()): e
   app.use(express.urlencoded({ extended: true }));
   app.use(fileUpload({ limits: { fileSize: 100 * 1024 * 1024 } }));
 
-  // Pool counts are reported here as well as logged, so they can be read
-  // during an incident. They do not affect the status yet: the container
-  // healthcheck reads only that.
+  // A 503 once any S3 pool has stayed full past S3_POOL_UNHEALTHY_AFTER_MS,
+  // so the orchestrator replaces a task whose sockets are held. Before this,
+  // /health stayed green while every upload and editor load failed.
   app.get("/health", (_req, res) => {
-    res.json({
-      healthy: true,
+    const stuck = monitor?.stuck() ?? {};
+    const healthy = Object.keys(stuck).length === 0;
+    res.status(healthy ? 200 : 503).json({
+      healthy,
       service: "h5p-service",
+      stuck,
       s3Pools: Object.fromEntries(stack.pools.map((pool) => [pool.name, pool.stats()])),
       inFlight: inFlight.summary(),
     });
@@ -87,6 +98,16 @@ export function createApp(stack: H5PStack, inFlight = new InFlightRequests()): e
   app.use("/h5p", express.static(path.join(projectRoot, "public")));
 
   app.use(legacyRouter());
+
+  // The .h5p download, replacing Lumi's, which could hold fifty S3 sockets
+  // per abandoned export. See routes/download.ts.
+  app.use(
+    "/h5p",
+    downloadRouter(stack, {
+      idleTimeoutMs: config.s3.streamIdleTimeoutMs,
+      maxConcurrent: config.download.maxConcurrent,
+    })
+  );
 
   // Library, content and temporary files, replacing Lumi's routes for them,
   // which can leave S3 sockets held forever. See routes/files.ts.
@@ -117,7 +138,7 @@ export function createApp(stack: H5PStack, inFlight = new InFlightRequests()): e
         routeCoreFiles: true,
         routeGetContentFile: false,
         routeGetLibraryFile: false,
-        routeGetDownload: true,
+        routeGetDownload: false,
         routeGetParameters: true,
         routeEditorCoreFiles: config.authoring.enabled,
         routeGetAjax: config.authoring.enabled,

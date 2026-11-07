@@ -1,8 +1,9 @@
 import * as H5P from "@lumieducation/h5p-server";
-import { initMongo, S3TemporaryFileStorage } from "@lumieducation/h5p-mongos3";
+import { initMongo } from "@lumieducation/h5p-mongos3";
 import { S3 } from "@aws-sdk/client-s3";
 import IntegerIdContentStorage from "./storage/IntegerIdContentStorage.js";
 import StreamingLibraryStorage from "./storage/StreamingLibraryStorage.js";
+import TemporaryFileStorage from "./storage/TemporaryFileStorage.js";
 import { S3Pool } from "./observability/s3Pool.js";
 import CapabilityPermissionSystem from "./auth/CapabilityPermissionSystem.js";
 import config from "./config.js";
@@ -19,7 +20,9 @@ export interface H5PStack {
    * methods Lumi does not know about, such as the display-option bitmask.
    */
   contentStorage: IntegerIdContentStorage;
-  /** The socket pools behind the two S3 clients, for the pool gauge and /health. */
+  /** The rights Lumi is given. Read by the download route, which replaces Lumi's. */
+  permissionSystem: H5P.IPermissionSystem;
+  /** The socket pools behind the S3 clients, for the pool gauge and /health. */
   pools: S3Pool[];
 }
 
@@ -63,7 +66,7 @@ export async function buildH5P(): Promise<H5PStack> {
   ]) {
     buckets[bucket] = buckets[bucket] ? `${buckets[bucket]}+${role}` : role;
   }
-  const mainPool = new S3Pool("main", buckets);
+  const mainPool = new S3Pool("main", buckets, config.s3.requestTimeoutMs);
   const s3 = new S3({ ...s3Options, requestHandler: mainPool.requestHandler() });
 
   /**
@@ -72,7 +75,7 @@ export async function buildH5P(): Promise<H5PStack> {
    * finishes in milliseconds and is what embeds and the editor wait on.
    * See `routes/files.ts`.
    */
-  const streamPool = new S3Pool("stream", buckets);
+  const streamPool = new S3Pool("stream", buckets, config.s3.requestTimeoutMs);
   const streamS3 = new S3({ ...s3Options, requestHandler: streamPool.requestHandler() });
 
   const db = await initMongo(config.mongo.url, config.mongo.db);
@@ -94,9 +97,15 @@ export async function buildH5P(): Promise<H5PStack> {
     streamS3
   );
 
-  // Wholly on the download client: only the editor uses temporary files, and
-  // its previews must not reach the pool embeds depend on.
-  const temporaryStorage = new S3TemporaryFileStorage(streamS3, {
+  /**
+   * Temporary files get a third client. Only the editor uses them, for
+   * uploads, previews and the copy into an activity on save, so nothing
+   * public can fill the pool an upload needs, and editor traffic cannot fill
+   * the pools embeds need.
+   */
+  const uploadPool = new S3Pool("upload", buckets, config.s3.requestTimeoutMs);
+  const uploadS3 = new S3({ ...s3Options, requestHandler: uploadPool.requestHandler() });
+  const temporaryStorage = new TemporaryFileStorage(uploadS3, {
     s3Bucket: config.s3.temporaryBucket,
   });
 
@@ -165,7 +174,14 @@ export async function buildH5P(): Promise<H5PStack> {
     "H5P stack initialized"
   );
 
-  return { editor, player, config: h5pConfig, contentStorage, pools: [mainPool, streamPool] };
+  return {
+    editor,
+    player,
+    config: h5pConfig,
+    contentStorage,
+    permissionSystem,
+    pools: [mainPool, streamPool, uploadPool],
+  };
 }
 
 /**

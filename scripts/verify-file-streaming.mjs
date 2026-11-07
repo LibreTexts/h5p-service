@@ -11,6 +11,7 @@
 import http from "node:http";
 import net from "node:net";
 import { Readable } from "node:stream";
+import { randomBytes } from "node:crypto";
 import express from "express";
 import { S3 } from "@aws-sdk/client-s3";
 import { H5pError, streamToString } from "@lumieducation/h5p-server";
@@ -21,6 +22,11 @@ process.env.LOG_LEVEL ||= "warn";
 const { default: fileRouter } = await import("../dist/routes/files.js");
 const { default: StreamingLibraryStorage } = await import("../dist/storage/StreamingLibraryStorage.js");
 const { default: IntegerIdContentStorage } = await import("../dist/storage/IntegerIdContentStorage.js");
+const { default: TemporaryFileStorage } = await import("../dist/storage/TemporaryFileStorage.js");
+const { default: downloadRouter } = await import("../dist/routes/download.js");
+const { S3Pool } = await import("../dist/observability/s3Pool.js");
+const { PoolMonitor } = await import("../dist/observability/poolGauge.js");
+const { InFlightRequests } = await import("../dist/observability/requestLog.js");
 
 let failures = 0;
 function check(name, ok, detail) {
@@ -260,6 +266,210 @@ function stopReading(port) {
   check("a content HEAD stays on the quick client", quick.seen.length === 1 && stream.seen.length === 0);
   await streamToString(await content.getFileStream("31483", "a.mp4"));
   check("a content download opens on the stream client", stream.seen.length === 1);
+}
+
+// ------------------------------------------------------------ the .h5p download
+// Lumi's exporter opened a stream for every file in the package at once and
+// left them all held when the client went. GoogleOther fetches these links.
+
+/**
+ * A fake S3 that counts responses still being sent, and the most at once.
+ * Random bytes, because yazl deflates: repeated bytes would shrink to almost
+ * nothing and a client that stops reading would never push back.
+ */
+async function startCountingS3(size, { pool } = {}) {
+  const body = randomBytes(size);
+  const state = { open: 0, maxOpen: 0, gets: 0 };
+  const server = http.createServer((req, res) => {
+    if (req.method === "GET") state.gets += 1;
+    state.open += 1;
+    state.maxOpen = Math.max(state.maxOpen, state.open);
+    res.once("close", () => (state.open -= 1));
+    res.writeHead(200, { "Content-Type": "application/octet-stream", "Content-Length": body.length });
+    res.end(req.method === "HEAD" ? undefined : body);
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  fakeS3s.push(server);
+  const s3 = new S3({
+    region: "us-east-1",
+    endpoint: `http://127.0.0.1:${server.address().port}`,
+    forcePathStyle: true,
+    credentials: { accessKeyId: "verify", secretAccessKey: "verify" },
+    ...(pool ? { requestHandler: pool.requestHandler() } : {}),
+  });
+  return { s3, state };
+}
+
+const inUse = (pool) => pool.stats().origins.shared?.inUse ?? 0;
+
+const LIBRARY_FILES = 120; // more than twice the pool, like an Interactive Book
+const CONTENT_FILES = ["images/a.png", "images/b.png"];
+
+function downloadStack(s3) {
+  const open = async (Key) => (await s3.getObject({ Bucket: "verify", Key })).Body;
+  const library = { machineName: "H5P.Verify", majorVersion: 1, minorVersion: 0 };
+  const metadata = { title: "verify", mainLibrary: "H5P.Verify", preloadedDependencies: [library] };
+  return {
+    config: { downloadUrl: "/download" },
+    permissionSystem: { checkForContent: async () => true },
+    contentStorage: {
+      contentExists: async (id) => id === "31483",
+      getParameters: async () => ({ text: "verify" }),
+      getMetadata: async () => metadata,
+      listFiles: async () => CONTENT_FILES,
+      getFileStream: (id, file) => open(`${id}/${file}`),
+    },
+    editor: {
+      libraryManager: {
+        libraryStorage: { getLibrary: async (name) => ({ ...name, preloadedDependencies: [] }) },
+        getSemantics: async () => [],
+        listFiles: async () => Array.from({ length: LIBRARY_FILES }, (_, i) => `scripts/f${i}.js`),
+        getFileStream: (_library, file) => open(`lib/${file}`),
+      },
+    },
+  };
+}
+
+async function startDownloadApp(stack, { maxConcurrent = 100, idleTimeoutMs = IDLE_TIMEOUT_MS } = {}) {
+  const app = express();
+  app.use((req, _res, next) => {
+    req.user = { id: "verify" };
+    next();
+  });
+  app.use("/h5p", downloadRouter(stack, { idleTimeoutMs, maxConcurrent }));
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise((resolve) => server.once("listening", resolve));
+  servers.push(server);
+  return server.address().port;
+}
+
+const DOWNLOAD = "GET /h5p/download/31483 HTTP/1.1\r\nHost: verify\r\nConnection: close\r\n\r\n";
+
+/** Starts a download and stops reading it, like a client that stalled. */
+function stallDownload(port) {
+  const socket = net.connect(port, "127.0.0.1", () => {
+    socket.write(DOWNLOAD);
+    socket.pause();
+  });
+  socket.on("error", () => {});
+  sockets.push(socket);
+}
+
+{
+  const pool = new S3Pool("verify");
+  const { s3, state } = await startCountingS3(64 * 1024, { pool });
+  const port = await startDownloadApp(downloadStack(s3));
+
+  const r = await get(port, "/h5p/download/31483", { timeoutMs: 20000 });
+  const text = r.body.toString("latin1");
+  check("a download is a 200 zip", r.status === 200 && r.headers["content-type"] === "application/zip" && text.startsWith("PK"));
+  check("a download names the package after the content id", r.headers["content-disposition"] === "attachment; filename=31483.h5p");
+  const names = ["h5p.json", "content/content.json", ...CONTENT_FILES.map((f) => `content/${f}`), "H5P.Verify-1.0/scripts/f119.js"];
+  check("a download carries metadata, parameters, content files and library files", names.every((n) => text.includes(n)));
+  check("a download opens one S3 file at a time", state.maxOpen === 1, `max open ${state.maxOpen}`);
+
+  const missing = await get(port, "/h5p/download/999");
+  check("a download of unknown content is a 404", missing.status === 404, String(missing.status));
+
+  // Clients that leave partway, as a crawler that gives up does.
+  await Promise.all(
+    Array.from({ length: CLIENTS }, () =>
+      new Promise((resolve) => {
+        const socket = net.connect(port, "127.0.0.1", () => socket.write(DOWNLOAD));
+        socket.on("error", () => {});
+        setTimeout(() => {
+          socket.destroy();
+          resolve();
+        }, 60);
+      })
+    )
+  );
+  await sleep(500);
+  const gets = state.gets;
+  await sleep(500);
+  check(`${CLIENTS} downloads the client left stop opening files`, state.gets === gets, `${state.gets - gets} more GETs`);
+  check(`${CLIENTS} downloads the client left hold no S3 sockets`, inUse(pool) === 0, JSON.stringify(pool.stats().origins));
+}
+
+{
+  const pool = new S3Pool("verify");
+  const { s3 } = await startCountingS3(4 * 1024 * 1024, { pool });
+  const port = await startDownloadApp(downloadStack(s3));
+  for (let i = 0; i < 5; i++) stallDownload(port);
+  await sleep(IDLE_TIMEOUT_MS * 3);
+  check("downloads whose client stopped reading release their sockets", inUse(pool) === 0, JSON.stringify(pool.stats().origins));
+}
+
+{
+  const { s3 } = await startCountingS3(LARGE);
+  const port = await startDownloadApp(downloadStack(s3), { maxConcurrent: 2, idleTimeoutMs: 5000 });
+  stallDownload(port);
+  stallDownload(port);
+  await sleep(300);
+  const r = await get(port, "/h5p/download/31483");
+  check("a download beyond the limit is a 503 with Retry-After", r.status === 503 && r.headers["retry-after"] === "60", String(r.status));
+}
+
+// ------------------------------------------------------------ request timeouts
+// A request queued behind a full pool used to wait forever.
+{
+  const held = [];
+  const server = http.createServer((_req, res) => held.push(res));
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  fakeS3s.push(server);
+  const silentS3 = (pool, extra = {}) =>
+    new S3({
+      region: "us-east-1",
+      endpoint: `http://127.0.0.1:${server.address().port}`,
+      forcePathStyle: true,
+      credentials: { accessKeyId: "verify", secretAccessKey: "verify" },
+      requestHandler: pool.requestHandler(),
+      ...extra,
+    });
+
+  const pool = new S3Pool("verify", {}, 1000);
+  const s3 = silentS3(pool, { maxAttempts: 1 });
+  const started = Date.now();
+  const results = await Promise.allSettled(Array.from({ length: CLIENTS }, (_, i) => s3.headObject({ Bucket: "verify", Key: `k${i}` })));
+  const ms = Date.now() - started;
+  check(`${CLIENTS} requests to an S3 that never answers all fail`, results.every((r) => r.status === "rejected"));
+  check("queued requests fail within their timeout rather than waiting their turn", ms < 3000, `${ms} ms`);
+  await sleep(100);
+  const stats = pool.stats().origins.shared ?? { inUse: 0, queued: 0 };
+  check("timed-out requests leave nothing queued or held", stats.inUse === 0 && stats.queued === 0, JSON.stringify(stats));
+
+  // The monitor calls a pool stuck once it has queued at every sample past the limit.
+  const stuckPool = new S3Pool("stuck");
+  const stuckS3 = silentS3(stuckPool);
+  for (let i = 0; i < CLIENTS; i++) stuckS3.headObject({ Bucket: "verify", Key: `s${i}` }).catch(() => {});
+  await sleep(300);
+  const monitor = new PoolMonitor([stuckPool], new InFlightRequests(), { reportMs: 60_000, unhealthyAfterMs: 200 });
+  monitor.sample();
+  check("a pool queued for less than the limit is not stuck", Object.keys(monitor.stuck()).length === 0);
+  await sleep(300);
+  monitor.sample();
+  check("a pool queued past the limit is stuck", Object.keys(monitor.stuck()).join() === "stuck shared", JSON.stringify(monitor.stuck()));
+  for (const res of held) res.destroy();
+  stuckPool.httpAgent.destroy();
+}
+
+// ------------------------------------------------------------ temporary files
+// Lumi's save copies uploads into the activity and cleans up with close(),
+// which an S3 body lacks, so a failed copy held its socket for good.
+{
+  const pool = new S3Pool("verify");
+  const { s3 } = await startCountingS3(LARGE, { pool });
+  const storage = new TemporaryFileStorage(s3, { s3Bucket: "verify" });
+  const stream = await storage.getFileStream("images/a.png", { id: "verify" });
+  check("a temporary file stream can be closed", typeof stream.close === "function");
+  stream.close();
+  await sleep(100);
+  check("closing a temporary file stream releases its socket", inUse(pool) === 0, JSON.stringify(pool.stats().origins));
+
+  const { s3: ranged } = await startFakeS3(4096);
+  const tmp = new TemporaryFileStorage(ranged, { s3Bucket: "verify" });
+  const first = await streamToString(await tmp.getFileStream("images/a.png", { id: "verify" }, 0, 9));
+  check("a temporary file range starting at byte 0 is a range", first.length === 10, `${first.length} bytes`);
 }
 
 // ------------------------------------------------------------ done
