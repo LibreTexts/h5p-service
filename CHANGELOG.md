@@ -1,3 +1,10 @@
+## [0.5.1](https://github.com/LibreTexts/h5p-service/compare/v0.5.0...v0.5.1) (2026-11-07)
+
+
+### Bug Fixes
+
+* **storage:** bound S3 requests and stop exports and uploads from pinning socket pools ([094f497](https://github.com/LibreTexts/h5p-service/commit/094f4972835662f5a3a70b98db00912b74816302))
+
 # [0.5.0](https://github.com/LibreTexts/h5p-service/compare/v0.4.8...v0.5.0) (2026-11-07)
 
 
