@@ -1,3 +1,10 @@
+## [0.6.1](https://github.com/LibreTexts/h5p-service/compare/v0.6.0...v0.6.1) (2026-11-12)
+
+
+### Bug Fixes
+
+* **embed:** patch FindTheWords sizing and drag selection in narrow frames ([7b1bba5](https://github.com/LibreTexts/h5p-service/commit/7b1bba50a87c644ffd939ce214ed09a5a855e878))
+
 # [0.6.0](https://github.com/LibreTexts/h5p-service/compare/v0.5.1...v0.6.0) (2026-11-07)
 
 
