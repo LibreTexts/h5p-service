@@ -127,6 +127,9 @@ export function renderEmbed(
     <script>window.H5PIntegration = ${toScriptJson(integration)};</script>
     <script>window.__LIBRETEXTS_EMBED__ = ${toScriptJson(embedSettings)};</script>
     ${scripts}
+    <!-- After the library scripts and before H5P.init on DOM ready: see the
+         file header. -->
+    <script src="/h5p/library-patches.js"></script>
   </head>
   <body>
     <div class="h5p-content" data-content-id="${escapeHtml(contentId)}"></div>

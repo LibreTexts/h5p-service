@@ -122,6 +122,23 @@ for (const token of [
   check(`embed html contains ${token}`, html.includes(token));
 }
 
+// Library patches have to run after the library scripts define their
+// prototypes and before H5P.init builds instances, or they silently do nothing.
+{
+  const patches = await fetch(`${base}/h5p/library-patches.js`);
+  const patchesBody = await patches.text();
+  check("library patches script is served", patches.status === 200, `got ${patches.status}`);
+  check("library patches include FindTheWords width fix", patchesBody.includes("H5P.FindTheWords"));
+  check("library patches include FindTheWords narrow-grid fix", patchesBody.includes("fitted"));
+  check("library patches include FindTheWords drag-row fix", patchesBody.includes("correctPointerY"));
+  const patchTag = html.indexOf('<script src="/h5p/library-patches.js">');
+  const lastLibraryScript = html.indexOf('<script src="/h5p/core/js/h5p.js">');
+  check(
+    "library patches load after library scripts, inside <head>",
+    patchTag > lastLibraryScript && lastLibraryScript !== -1 && patchTag < html.indexOf("</head>")
+  );
+}
+
 // The action bar. Lumi defaults every option off, which hid the bar, and the
 // license it carries, on every migrated embed. Studio's disabled_features bits:
 // 1 frame, 2 download, 4 embed, 8 copyright.
