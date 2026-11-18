@@ -155,6 +155,23 @@ check("ids increment and do not repeat", Number(newId2) === Number(newId) + 1, `
 const usage = await storage.getUsage({ machineName: "H5P.MultiChoice", majorVersion: 1, minorVersion: 16 });
 check("getUsage counts main-library use", usage.asMainLibrary === 3, JSON.stringify(usage));
 
+// 6a. A clone copies the document and every file, and starts private.
+const CLONE_ID = "41483"; // clear of the counter ids section 4 created
+await storage.copyContent(STUDIO_ID, CLONE_ID, user);
+check("copyContent copies metadata and parameters", (await storage.getMetadata(CLONE_ID)).title === (await storage.getMetadata(STUDIO_ID)).title
+  && JSON.stringify(await storage.getParameters(CLONE_ID)) === JSON.stringify(await storage.getParameters(STUDIO_ID)));
+check("copyContent copies display options", (await storage.getDisabledFeatures(CLONE_ID)) === 6);
+check("a clone starts private", await storage.isPrivate(CLONE_ID));
+check("copyContent copies every file", JSON.stringify((await storage.listFiles(CLONE_ID, user)).sort()) === JSON.stringify((await storage.listFiles(STUDIO_ID, user)).sort()));
+let cloneStatus;
+try { await storage.copyContent(STUDIO_ID, CLONE_ID, user); } catch (e) { cloneStatus = e.httpStatusCode; }
+check("copyContent refuses a target that holds content", cloneStatus === 409, `got ${cloneStatus}`);
+cloneStatus = undefined;
+try { await storage.copyContent("999997", "999996", user); } catch (e) { cloneStatus = e.httpStatusCode; }
+check("copyContent of a missing source is a 404 and writes nothing", cloneStatus === 404 && !(await storage.contentExists("999996")));
+await storage.deleteContent(CLONE_ID, user);
+check("deleting a clone keeps the source's files", (await storage.listFiles(STUDIO_ID, user)).length === 2);
+
 // 6. Delete removes both the document and its S3 objects.
 await storage.deleteContent(STUDIO_ID, user);
 check("deleteContent removes the document", (await storage.contentExists(STUDIO_ID)) === false);

@@ -95,6 +95,7 @@ check("a token from the next key verifies during rotation", (await reason(sign({
 check("a create token needs no cid", (await reason(sign({ act: ["create"], cid: undefined }, { omit: ["cid"] }))) === "accepted");
 check("a view token with a cid verifies", (await reason(sign({ act: ["view"] }))) === "accepted");
 check("a visibility token verifies with a cid", (await reason(sign({ act: ["visibility"] }))) === "accepted");
+check("a clone token carries its source", (await verify(await sign({ act: ["clone"], src: 12 }))).sourceContentId === "12");
 check("a visibility token verifies without a cid (reconcile)", (await reason(sign({ act: ["visibility"] }, { omit: ["cid"] }))) === "accepted");
 
 const cases = [
@@ -112,6 +113,10 @@ const cases = [
   ["edit without a cid", sign({}, { omit: ["cid"] }), "bad-claims"],
   ["delete without a cid", sign({ act: ["delete"] }, { omit: ["cid"] }), "bad-claims"],
   ["view without a cid", sign({ act: ["view"] }, { omit: ["cid"] }), "bad-claims"],
+  ["clone without a src", sign({ act: ["clone"] }), "bad-claims"],
+  ["clone from itself", sign({ act: ["clone"], src: "31483" }), "bad-claims"],
+  ["src in exponent form", sign({ act: ["clone"], src: "1e3" }), "bad-claims"],
+  ["clone without a cid", sign({ act: ["clone"], src: "12" }, { omit: ["cid"] }), "bad-claims"],
   ["cid with trailing space", sign({ cid: "12 " }), "bad-claims"],
   ["cid in exponent form", sign({ cid: "1e3" }), "bad-claims"],
   ["cid of zero", sign({ cid: "0" }), "bad-claims"],

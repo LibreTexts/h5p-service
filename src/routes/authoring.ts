@@ -93,6 +93,9 @@ function requireCapability(action: CapabilityAction, matchParam?: string) {
  *   token. Server to server, from Conductor.
  * - `DELETE /service/content/{id}`: deletes content and its files, under a
  *   `delete` token for that id. Server to server, from Conductor.
+ * - `POST /service/content/{id}/clone`: copies the token's `src` content into
+ *   the empty id, with an optional new `title`, under a `clone` token for that
+ *   id. Server to server.
  * - `PUT /service/content/{id}/visibility`: marks content private or public,
  *   under a `visibility` token for that id. Server to server, from Conductor.
  * - `PUT /service/private-content`: replaces the full set of private content,
@@ -282,6 +285,35 @@ export default function authoringRouter(stack: H5PStack): Router {
         const status = typeof err?.httpStatusCode === "number" ? err.httpStatusCode : 500;
         log.error({ err, contentId }, "Content delete failed");
         res.status(status).json({ error: err?.errorId || "delete_failed" });
+      }
+    }
+  );
+
+  router.post(
+    `/service/content/:contentId${CONTENT_ID}/clone`,
+    requireCapability("clone", "contentId"),
+    express.json({ limit: "2kb" }),
+    async (req: Request, res: Response) => {
+      const { contentId } = req.params;
+      const title = req.body?.title;
+      // H5P's own limit on a content title.
+      if (title !== undefined && (typeof title !== "string" || title.trim().length === 0 || title.length > 255)) {
+        res.status(400).json({ error: "title must be a string of 1 to 255 characters" });
+        return;
+      }
+      const user = userOf(req) as CapabilityUser;
+      const sourceId = user.capability?.sourceContentId as string;
+      try {
+        await stack.contentStorage.copyContent(sourceId, contentId, user, title);
+        log.info(
+          { contentId, sourceId, sub: user.capability?.subject, jti: user.capability?.tokenId },
+          "Content cloned"
+        );
+        res.status(201).json({ contentId });
+      } catch (err: any) {
+        const status = err?.httpStatusCode === 404 || err?.httpStatusCode === 409 ? err.httpStatusCode : 500;
+        log[status === 500 ? "error" : "warn"]({ err, contentId, sourceId }, "Content clone failed");
+        res.status(status).json({ error: status === 404 ? "not_found" : status === 409 ? "exists" : "clone_failed" });
       }
     }
   );

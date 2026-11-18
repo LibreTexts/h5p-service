@@ -91,8 +91,8 @@ function check(name, ok, detail) {
 }
 
 const now = () => Math.floor(Date.now() / 1000);
-function token(act, cid, sub = "11111111-1111-4111-8111-111111111111") {
-  const claims = { act, jti: crypto.randomUUID(), ...(cid !== undefined ? { cid: String(cid) } : {}) };
+function token(act, cid, sub = "11111111-1111-4111-8111-111111111111", extra = {}) {
+  const claims = { act, jti: crypto.randomUUID(), ...(cid !== undefined ? { cid: String(cid) } : {}), ...extra };
   return new SignJWT(claims)
     .setProtectedHeader({ alg: "EdDSA", kid: jwk.kid })
     .setIssuer("conductor").setAudience("h5p-service").setSubject(sub)
@@ -100,7 +100,7 @@ function token(act, cid, sub = "11111111-1111-4111-8111-111111111111") {
     .sign(keys.privateKey);
 }
 const auth = async (act, cid) => ({ authorization: `Bearer ${await token(act, cid)}` });
-const service = async (act, cid) => ({ authorization: `Bearer ${await token(act, cid, "conductor-service")}` });
+const service = async (act, cid, extra) => ({ authorization: `Bearer ${await token(act, cid, "conductor-service", extra)}` });
 async function call(method, url, { headers = {}, json, body } = {}) {
   const init = { method, headers: { ...headers } };
   if (json !== undefined) {
@@ -371,6 +371,30 @@ check("a failed first save leaves no placeholder behind", !(await stack.contentS
 r = await call("POST", "/h5p/ajax?action=library-install&id=H5P.Accordion", { headers: await auth(["edit"], contentId) });
 const installed = await stack.editor.libraryManager.listInstalledLibraries();
 check("an author cannot install a library", r.status >= 400 && !installed["H5P.Accordion"], `got ${r.status}`);
+
+// ---------------------------------------------------------- clone
+const cloneId = (await call("POST", "/h5p/service/allocate", { headers: await service(["allocate"]) })).body.contentId;
+r = await call("POST", `/h5p/service/content/${cloneId}/clone`, { headers: await auth(["edit"], cloneId) });
+check("clone with an edit token is a 403", r.status === 403);
+r = await call("POST", `/h5p/service/content/${cloneId}/clone`, { headers: await service(["clone"], Number(cloneId) + 1, { src: contentId }) });
+check("clone with a token for another id is a 403", r.status === 403);
+r = await call("POST", `/h5p/service/content/${cloneId}/clone`, { headers: await service(["clone"], cloneId, { src: 99999 }) });
+check("cloning unknown content is a 404 and leaves nothing", r.status === 404 && !(await stack.contentStorage.contentExists(cloneId)));
+r = await call("POST", `/h5p/service/content/${cloneId}/clone`, { json: { title: "" }, headers: await service(["clone"], cloneId, { src: contentId }) });
+check("an empty clone title is a 400", r.status === 400);
+r = await call("POST", `/h5p/service/content/${cloneId}/clone`, { json: { title: "Verify activity (CLONE)" }, headers: await service(["clone"], cloneId, { src: contentId }) });
+check("a clone token copies content into the allocated id", r.status === 201 && r.body.contentId === cloneId, `${r.status} ${JSON.stringify(r.body)}`);
+check("the clone takes the new title", (await stack.contentStorage.getMetadata(cloneId)).title === "Verify activity (CLONE)");
+check("the clone starts private", await stack.contentStorage.isPrivate(cloneId));
+check("the clone keeps the raw parameters", (await stack.contentStorage.getParameters(cloneId))?.image?.path === "../content/21078/images/a.png#tmp");
+check("the clone keeps the display options", (await stack.contentStorage.getDisabledFeatures(cloneId)) === (await stack.contentStorage.getDisabledFeatures(contentId)));
+const keysUnder = async (id) => ((await s3.send(new ListObjectsV2Command({ Bucket: `${RUN}-content`, Prefix: `${id}/` }))).Contents ?? []).map((o) => o.Key.slice(`${id}/`.length)).sort();
+const srcFiles = await keysUnder(contentId);
+check("the clone has a copy of every file", srcFiles.length > 0 && JSON.stringify(await keysUnder(cloneId)) === JSON.stringify(srcFiles), (await keysUnder(cloneId)).join(", "));
+r = await call("POST", `/h5p/service/content/${cloneId}/clone`, { headers: await service(["clone"], cloneId, { src: contentId }) });
+check("cloning into an id that holds content is a 409", r.status === 409);
+r = await call("DELETE", `/h5p/service/content/${cloneId}`, { headers: await service(["delete"], cloneId) });
+check("deleting the clone leaves the source's files", r.status === 204 && JSON.stringify(await keysUnder(contentId)) === JSON.stringify(srcFiles));
 
 // ---------------------------------------------------------- delete
 r = await call("DELETE", `/h5p/service/content/${contentId}`, { headers: await service(["delete"], Number(contentId) + 1) });

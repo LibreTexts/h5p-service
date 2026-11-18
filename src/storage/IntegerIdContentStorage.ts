@@ -406,6 +406,58 @@ export default class IntegerIdContentStorage implements IContentStorage {
   }
 
   /**
+   * Copies content into a new id: the stored metadata, parameters and display
+   * options as they are, and every file under `{sourceId}/` by S3 CopyObject.
+   * The copy starts private, like a first save. Parameters are copied raw,
+   * not filtered, because display filters them on every read.
+   *
+   * Throws 404 when the source is missing and 409 when the target already
+   * holds content. Any later failure removes the partial copy.
+   *
+   * @param title replaces the copied metadata title when given
+   */
+  async copyContent(sourceId: ContentId, targetId: ContentId, user: IUser, title?: string): Promise<void> {
+    const source = await this.mongodb.findOne({ _id: String(sourceId) });
+    if (!source) {
+      throw new H5pError("mongo-s3-content-storage:content-not-found", {}, 404);
+    }
+    try {
+      await this.mongodb.insertOne({
+        _id: String(targetId),
+        metadata: title === undefined ? source.metadata : { ...source.metadata, title },
+        parameters: source.parameters,
+        creator: user.id,
+        ...(typeof source.disabledFeatures === "number" ? { disabledFeatures: source.disabledFeatures } : {}),
+        private: true,
+      } as any);
+    } catch (error: any) {
+      if (error?.code === 11000) {
+        throw new H5pError("mongo-s3-content-storage:content-exists", {}, 409);
+      }
+      throw error;
+    }
+    try {
+      for (const filename of await this.listFiles(sourceId, user)) {
+        await this.s3.copyObject({
+          Bucket: this.options.s3Bucket,
+          // CopySource must be URL-encoded; keep the separators literal.
+          CopySource: [this.options.s3Bucket, ...IntegerIdContentStorage.getS3Key(sourceId, filename).split("/")]
+            .map(encodeURIComponent)
+            .join("/"),
+          Key: IntegerIdContentStorage.getS3Key(targetId, filename),
+          ACL: this.options.s3Acl ?? "private",
+        });
+      }
+    } catch (error: any) {
+      log.error({ err: error, sourceId, targetId }, "Content file copy failed");
+      await this.deleteContent(targetId, user).catch((cleanupErr: unknown) =>
+        log.error({ err: cleanupErr, contentId: targetId }, "Could not remove a partial copy")
+      );
+      throw new H5pError("mongo-s3-content-storage:s3-upload-error", { filename: "" }, 500);
+    }
+  }
+
+  /**
    * Raises the id counter so newly created content never reuses a Studio id.
    * Called by the migration once content is imported.
    */

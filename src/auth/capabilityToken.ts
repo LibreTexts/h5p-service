@@ -40,6 +40,8 @@ const CLOCK_TOLERANCE_SECONDS = 30;
  *   download). Public content needs no token.
  * - `visibility`: mark content private or public. Server to server only.
  *   With a `cid`, that content alone; without, the full private set.
+ * - `clone`: copy the content under `src` into the empty id `cid`. Server to
+ *   server only; Conductor checks the caller may view the source.
  */
 export const CAPABILITY_ACTIONS = [
   "edit",
@@ -49,17 +51,23 @@ export const CAPABILITY_ACTIONS = [
   "libraries",
   "view",
   "visibility",
+  "clone",
 ] as const;
 export type CapabilityAction = (typeof CAPABILITY_ACTIONS)[number];
 
 /** Actions that only make sense for one particular content id. */
-const ACTIONS_NEEDING_CID: readonly CapabilityAction[] = ["edit", "delete", "view"];
+const ACTIONS_NEEDING_CID: readonly CapabilityAction[] = ["edit", "delete", "view", "clone"];
+
+/** Content ids as Lumi carries them. Rejects "12 " and "1e3". */
+const CONTENT_ID_CLAIM = /^[1-9]\d{0,15}$/;
 
 export type Capability = {
   /** Conductor user uuid, or `conductor-service` for server-to-server calls. */
   subject: string;
   /** The content id the token is scoped to, as the string Lumi uses. */
   contentId?: string;
+  /** The content a `clone` token copies from. */
+  sourceContentId?: string;
   actions: ReadonlySet<CapabilityAction>;
   /** Token id, logged with every write for audit. */
   tokenId: string;
@@ -152,22 +160,28 @@ function toCapability(payload: JWTPayload): Capability {
   // Content ids are Studio's integers, carried as strings everywhere in
   // Lumi. Accept either form and normalise, but nothing else: a cid like
   // "12 " or "1e3" must not match content 12 or 1000.
-  const rawCid = (payload as { cid?: unknown }).cid;
-  let contentId: string | undefined;
-  if (rawCid !== undefined) {
-    const asString = typeof rawCid === "number" ? String(rawCid) : rawCid;
-    if (typeof asString !== "string" || !/^[1-9]\d{0,15}$/.test(asString)) {
-      throw fail("cid must be a positive integer content id");
+  const contentIdClaim = (name: "cid" | "src"): string | undefined => {
+    const raw = (payload as Record<string, unknown>)[name];
+    if (raw === undefined) return undefined;
+    const asString = typeof raw === "number" ? String(raw) : raw;
+    if (typeof asString !== "string" || !CONTENT_ID_CLAIM.test(asString)) {
+      throw fail(`${name} must be a positive integer content id`);
     }
-    contentId = asString;
-  }
+    return asString;
+  };
+  const contentId = contentIdClaim("cid");
+  const sourceContentId = contentIdClaim("src");
   for (const a of ACTIONS_NEEDING_CID) {
     if (actions.has(a) && !contentId) throw fail(`act "${a}" needs a cid`);
+  }
+  if (actions.has("clone") && (!sourceContentId || sourceContentId === contentId)) {
+    throw fail('act "clone" needs a src that differs from cid');
   }
 
   return {
     subject,
     contentId,
+    sourceContentId,
     actions,
     tokenId: payload.jti,
     expiresAt: new Date((payload.exp as number) * 1000),
