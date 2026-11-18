@@ -1,3 +1,10 @@
+# [0.7.0](https://github.com/LibreTexts/h5p-service/compare/v0.6.1...v0.7.0) (2026-11-18)
+
+
+### Features
+
+* clone activities with provenance ([3951526](https://github.com/LibreTexts/h5p-service/commit/39515266bb222bafb6a5fda9507e7d574643d0a5))
+
 ## [0.6.1](https://github.com/LibreTexts/h5p-service/compare/v0.6.0...v0.6.1) (2026-11-12)
 
 
